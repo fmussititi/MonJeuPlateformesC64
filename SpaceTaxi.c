@@ -51,12 +51,14 @@
 #define WORLD_MIN_X  0
 #define WORLD_MAX_X  (MAP_W * 8 - PLAYER_WIDTH)  /* 40*8-12 = 308 */
 
-#define WORLD_MAX_Y  (MAP_H* 8 - PLAYER_HEIGHT)  /* sol à la tile 20 */
+#define WORLD_MAX_Y  (MAP_H * 8 - PLAYER_HEIGHT)  /* sol à la tile 20 */
 
 #define CHAR_EMPTY  32    /* espace */
 #define CHAR_SOLID  160   /* bloc plein (caractère inversé) */
 
 #define CHAR_HEART 83   // caractère PETSCII cœur (ou un autre)
+
+#define MAX_LEVELS 3
 
 /*=============================================================================
  *  Données du sprite joueur  (24×21 pixels, multicolore échiqueté)
@@ -139,7 +141,7 @@ static int respawnTimer = 0;
 
 static int playerHP = 3;
 static int playerInvTimer = 0;   // frames d’invincibilite
-#define hudDirty  (*(volatile uint8_t *)0x02)   /* zero page, adresse libre */
+static uint8_t hudDirty;
 
 /*=============================================================================
  *  Structs
@@ -162,6 +164,59 @@ typedef struct {
     uint8_t aiMode;   // 0 = patrouille, 1 = poursuite
 } Enemy;
 
+typedef struct {
+    uint8_t solidRows[8];
+    uint8_t solidRowCount;
+    struct {
+        uint8_t row;
+        uint8_t xStart;
+        uint8_t xEnd;
+    } platforms[4];
+    uint8_t platformCount;
+    struct {
+        int x, y;
+        int vx;
+    } enemies[MAX_ENEMIES];       /* ← ajout */
+    uint8_t enemyCount;           /* ← ajout */
+} LevelData;
+
+
+/*=============================================================================
+ *  Données sur les niveaux du jeu
+ *============================================================================*/
+
+static int currentLevel = 0;
+
+const LevelData levels[MAX_LEVELS] = {
+    /* Niveau 0 */
+    {
+        .solidRows     = {20},
+        .solidRowCount = 1,
+        .platforms     = {{14, 10, 20}},
+        .platformCount = 1,
+        .enemies       = {{80, 0, 200}, {200, 0, -200}},
+        .enemyCount    = 2
+    },
+    /* Niveau 1 */
+    {
+        .solidRows     = {20},
+        .solidRowCount = 1,
+        .platforms     = {{10, 5, 15}, {15, 25, 35}},
+        .platformCount = 2,
+        .enemies       = {{100, 0, 150}, {250, 0, -150}, {50, 0, 200}},
+        .enemyCount    = 3
+    },
+    /* Niveau 2 */
+    {
+        .solidRows     = {20},
+        .solidRowCount = 1,
+        .platforms     = {{8, 2, 12}, {12, 18, 28}, {16, 30, 38}},
+        .platformCount = 3,
+        .enemies       = {{60, 0, 250}, {180, 0, -250}, {280, 0, 200}, {120, 0, -200}},
+        .enemyCount    = 4
+    }
+};
+
 /*=============================================================================
  *  Prototypes
  *============================================================================*/
@@ -172,7 +227,6 @@ void updateEnemies(void);
 void updateLevelLogic(void);
 void updateSprites(void);
 void loadLevel(Level *level);
-void buildCollisionMap(Level *level);
 void applyPatches(void);
 static bool isSolidAtPixel(int px, int py);
 static void drawMap(void);
@@ -185,13 +239,13 @@ static void drawHUD(void);
 static void irq_hud(void);
 static void drawBottomPanel(void);
 static void irq_bottom(void);
+static void spawnLevelEnemies(void);
 
 /*=============================================================================
  *  Stubs (à implémenter)
  *============================================================================*/
 
 void updateLevelLogic(void) {}
-void loadLevel(Level *level)         { (void)level; }
 void applyPatches(void)     {}
 
 /*=============================================================================
@@ -265,6 +319,11 @@ static void playerTakeDamage(int knockbackDir)
 
 void updatePlayer(void)
 {
+    /* Sortie par la droite → niveau suivant */
+    if (playerX >= WORLD_MAX_X && !needLevelChange) {
+        needLevelChange = true;
+    }
+
     if (playerInvTimer > 0) {
         playerInvTimer--;
     }
@@ -481,29 +540,29 @@ static bool enemyCanSeePlayer(Enemy *e)
     return true;
 }
 
+static void spawnLevelEnemies(void)
+{
+    /* Désactive tous les ennemis */
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        enemies[i].active = false;
+        vic.spr_enable &= ~(1 << enemies[i].spriteId);
+    }
+
+    const LevelData *ld = &levels[currentLevel];
+
+    /* Respawn selon le niveau */
+    for (int i = 0; i < ld->enemyCount; i++) {
+        spawnEnemy(i,
+                   ld->enemies[i].x,
+                   ld->enemies[i].y,
+                   ld->enemies[i].vx);
+    }
+}
 
 /*=============================================================================
  *  Logique de collision
  *============================================================================*/
 static uint8_t collisionMap[MAP_H][MAP_W];
-
-void buildCollisionMap(Level *level)
-{
-    (void)level;
-
-    // Tout vide
-    memset(collisionMap, TILE_EMPTY, sizeof(collisionMap));
-
-    // Sol complet sur la ligne 24
-    for (int x = 0; x < MAP_W; ++x) {
-        collisionMap[20][x] = TILE_SOLID;
-    }
-
-    // Petite plateforme suspendue sur la ligne 16
-    for (int x = 10; x < 20; ++x) {
-        collisionMap[14][x] = TILE_SOLID;
-    }
-}
 
 static bool isSolidAtPixel(int px, int py)
 {
@@ -636,28 +695,47 @@ static void drawBottomPanel(void)
 }
 
 /*=============================================================================
+ *  CHARGEMENT DYNAMIQUE DES NIVEAUX
+ *============================================================================*/
+
+ void loadLevel(Level *level)
+{
+    (void)level;
+
+    const LevelData *ld = &levels[currentLevel];
+
+    memset(collisionMap, TILE_EMPTY, sizeof(collisionMap));
+
+    /* Sol */
+    for (int r = 0; r < ld->solidRowCount; r++)
+        for (int x = 0; x < MAP_W; x++)
+            collisionMap[ld->solidRows[r]][x] = TILE_SOLID;
+
+    /* Plateformes */
+    for (int p = 0; p < ld->platformCount; p++)
+        for (int x = ld->platforms[p].xStart; x < ld->platforms[p].xEnd; x++)
+            collisionMap[ld->platforms[p].row][x] = TILE_SOLID;
+}
+
+/*=============================================================================
  *  IRQ raster
  *============================================================================*/
 
 static void irq_hud(void)
 {
-    vic.color_back = VCOL_BLACK;
+    vic.color_back = VCOL_LT_GREY;
 }
 
 static void irq_bottom(void)
 {
     vic.color_back = VCOL_DARK_GREY;
-    vic.color_border = VCOL_BLACK;
+    //vic.color_border = VCOL_DARK_GREY;
 }
 
 static void irq_logic(void)
 {
-    updatePlayer();
-    updateEnemies();
-    updateLevelLogic();
-    updateSprites();
-
-    vic.color_back = VCOL_BLACK;
+    vic.color_back = VCOL_WHITE;
+    vic.color_border = VCOL_BLACK;
 }
 
 static void init_irq(void)
@@ -670,17 +748,17 @@ static void init_irq(void)
     rirq_call(hud, 1, irq_hud);
     rirq_set(0, 30, hud);
 
-    // --- IRQ bandeau bas (ligne 220) ---
+    // --- IRQ bandeau bas (ligne 215) ---
     RIRQCode *bottom = rirq_alloc(2);
     rirq_build(bottom, 2);
     rirq_call(bottom, 1, irq_bottom);
-    rirq_set(1, 215, bottom);
+    rirq_set(1, 225, bottom);
 
     // --- IRQ logique du jeu (ligne 240) ---
     RIRQCode *logic = rirq_alloc(2);
     rirq_build(logic, 2);
     rirq_call(logic, 1, irq_logic);
-    rirq_set(2, 240, logic);
+    rirq_set(2, 250, logic);
 
     rirq_sort();
     rirq_start();
@@ -696,30 +774,44 @@ int main(void)
     init_sprites();
     init_player();
     loadLevel(&level1);
-    buildCollisionMap(&level1);
     drawMap();
     drawBottomPanel();
-    spawnEnemy(0, 80, 0, 200);
-    spawnEnemy(1, 200, 120, -200);
+    spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
     init_irq();
 
     for (;;) {
-        byte lastCount = rirq_count;
-        while (rirq_count == lastCount)
-        ;
+        vic_waitFrame();
+
+        updatePlayer();
+        updateEnemies();
+        updateLevelLogic();
+        updateSprites();
 
         if (hudDirty) {
             drawHUD();
             hudDirty = 0;
         }
 
-        applyPatches(); 
-
         if (needLevelChange) {
-            /* TODO : charger le niveau suivant */
             needLevelChange = false;
-        }    
-    }      
 
-    return 0;
+            currentLevel++;
+            if (currentLevel >= MAX_LEVELS)
+                currentLevel = 0;
+
+            playerX  = 8;
+            playerY  = 0;
+            playerXf = (long)playerX << 8;
+            playerYf = (long)playerY << 8;
+            playerVx = 0;
+            playerVy = 0;
+            playerOnGround = false;
+
+            loadLevel(&level1);
+            memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
+            drawMap();
+            drawBottomPanel();
+            spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
+        }
+    }
 }
