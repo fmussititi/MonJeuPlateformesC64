@@ -141,6 +141,7 @@ static int respawnTimer = 0;
 
 static int playerHP = 3;
 static int playerInvTimer = 0;   // frames d’invincibilite
+static int playerScore = 0;
 static uint8_t hudDirty;
 
 /*=============================================================================
@@ -240,6 +241,7 @@ static void irq_hud(void);
 static void drawBottomPanel(void);
 static void irq_bottom(void);
 static void spawnLevelEnemies(void);
+static void drawNumber(char *row, char *colorRow, int pos, int value, int digits);
 
 /*=============================================================================
  *  Stubs (à implémenter)
@@ -331,8 +333,10 @@ void updatePlayer(void)
     if (playerIsDead) {
         respawnTimer--;
         if (respawnTimer <= 0) {
-            playerHP = 3;
-            hudDirty = 1; 
+            playerHP       = 3;
+            playerScore    = 0;
+            currentLevel   = 0;      /* ← retour au niveau 1 */
+            hudDirty       = 1;
             playerInvTimer = 60;
 
             playerX  = 20;
@@ -343,6 +347,13 @@ void updatePlayer(void)
             playerVy = 0;
 
             playerIsDead = false;
+
+            /* Recharger le niveau 0 */
+            loadLevel(&level1);
+            memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
+            drawMap();
+            drawBottomPanel();
+            spawnLevelEnemies();
         }
         return;
     }
@@ -520,8 +531,28 @@ void updateEnemies(void)
             if (checkCollisionAABB(playerX, playerY, PLAYER_WIDTH, PLAYER_HEIGHT,
                                 e->x,    e->y,    ENEMIES_WIDTH, ENEMIES_HEIGHT)) {
 
-                int dir = (playerX < e->x) ? -1 : 1;
-                playerTakeDamage(dir);
+                /* Le joueur tombe sur le dessus de l'ennemi ? */
+                int playerFeetY  = playerY + PLAYER_HEIGHT;
+                int enemyTopY    = e->y;
+                bool fromAbove   = (playerVy > 0) &&
+                                (playerFeetY <= enemyTopY + 4);  /* marge de 4px */
+
+                if (fromAbove) {
+                    /* Tuer l'ennemi */
+                    e->active = false;
+                    vic.spr_enable &= ~(1 << e->spriteId);
+                    playerScore += 100;
+                    hudDirty = 1;   /* redessiner le bandeau */
+
+                    /* Rebond du joueur */
+                    playerVy = PLAYER_JUMP_VY / 2;   /* demi-saut automatique */
+                    playerOnGround = false;
+                }
+                else {
+                    /* Contact latéral → dégâts */
+                    int dir = (playerX < e->x) ? -1 : 1;
+                    playerTakeDamage(dir);
+                }
             }
         }
     }
@@ -678,19 +709,44 @@ static void drawBottomPanel(void)
     char *row      = Screen   + (23 * 40);
     char *colorRow = ColorRAM + (23 * 40);
 
+    /* Efface la ligne */
     for (int i = 0; i < 40; i++) {
         row[i]      = CHAR_EMPTY;
         colorRow[i] = VCOL_LT_GREY;
     }
 
-    const char *msg = "READY !";
-    for (int i = 0; msg[i]; i++) {
-        /* Conversion ASCII majuscule → code écran C64 */
-        char c = msg[i];
-        if (c >= 'A' && c <= 'Z')
-            c = c - 'A' + 1;   /* A=1, B=2... Z=26 */
+    /* Label "SCORE" */
+    const char *label = "SCORE:";
+    for (int i = 0; label[i]; i++) {
+        char c = label[i];
+        if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
         row[2 + i]      = c;
         colorRow[2 + i] = VCOL_WHITE;
+    }
+
+    /* Valeur du score sur 6 chiffres */
+    drawNumber(row, colorRow, 9, playerScore, 6);
+
+    /* Niveau actuel */
+    const char *lvl = "LEVEL:";
+    for (int i = 0; lvl[i]; i++) {
+        char c = lvl[i];
+        if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
+        row[20 + i]      = c;
+        colorRow[20 + i] = VCOL_WHITE;
+    }
+    drawNumber(row, colorRow, 27, currentLevel + 1, 1);
+}
+
+static void drawNumber(char *row, char *colorRow, int pos, int value, int digits)
+{
+    for (int i = digits - 1; i >= 0; i--) {
+        int digit = value % 10;
+        value /= 10;
+        char c = digit + '0';   /* '0' = 48 en ASCII mais... */
+        /* Les chiffres ASCII 48-57 → codes écran C64 : 48-57 aussi, c'est bon ! */
+        row[pos + i]      = c;
+        colorRow[pos + i] = VCOL_YELLOW;
     }
 }
 
@@ -789,11 +845,13 @@ int main(void)
 
         if (hudDirty) {
             drawHUD();
+            drawBottomPanel();
             hudDirty = 0;
         }
 
         if (needLevelChange) {
             needLevelChange = false;
+            hudDirty = 1;
 
             currentLevel++;
             if (currentLevel >= MAX_LEVELS)
