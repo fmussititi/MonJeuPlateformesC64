@@ -121,7 +121,7 @@ const uint8_t sprite_enemy[64] = {
 #pragma data(music)
 
 __export const char music[] = {
-	#embed 0x2000 0x7e "./assets/music.sid" 
+	#embed 0x2000 0x7e "./assets/Breakfast.sid" 
 };
 
 #pragma data(data)
@@ -800,7 +800,7 @@ void music_init(char subtune)
 	__asm
 	{
 		lda		subtune
-		jsr		$afb2
+		jsr		$B318
 	}
 }
 
@@ -808,7 +808,7 @@ void music_play(void)
 {
 	__asm
 	{
-		jsr		$a012
+		jsr		$A006
 	}
 }
 
@@ -847,13 +847,13 @@ static void init_irq(void)
     rirq_call(hud, 0, irq_hud);
     rirq_set(0, 30, hud);
 
-    // --- IRQ bandeau bas (ligne 215) ---
+    // --- IRQ bandeau bas (ligne 225) ---
     RIRQCode *bottom = rirq_alloc(2);
     rirq_build(bottom, 1);
     rirq_call(bottom, 0, irq_bottom);
     rirq_set(1, 225, bottom);
 
-    // --- IRQ logique du jeu (ligne 240) ---
+    // --- IRQ logique du jeu (ligne 250) ---
     RIRQCode *logic = rirq_alloc(2);
     rirq_build(logic, 1);
     rirq_call(logic, 0, irq_logic);
@@ -863,7 +863,7 @@ static void init_irq(void)
     RIRQCode *music_rirq = rirq_alloc(2);
     rirq_build(music_rirq, 1);
 	rirq_call(music_rirq, 0, irq_music);
-	rirq_set(3, 15, music_rirq);
+	rirq_set(3, 10, music_rirq);
 
     rirq_sort();
     rirq_start();
@@ -875,7 +875,6 @@ static void init_irq(void)
 
 int main(void)
 {    
-    //rirq_init_kernal();
     hudDirty = 1;
     init_sprites();
     init_player();
@@ -893,7 +892,7 @@ int main(void)
         updatePlayer();
         updateEnemies();
         updateLevelLogic();
-        updateSprites();        
+        updateSprites();               
 
         if (hudDirty) {
             drawHUD();
@@ -922,6 +921,6 @@ int main(void)
             drawMap();
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
-        }
+        }        
     }
 }
