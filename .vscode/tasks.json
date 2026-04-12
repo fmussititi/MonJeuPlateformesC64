@@ -3,7 +3,7 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "build oscar64 Balles",
+            "label": "build oscar64",
             "command": "F:\\CompilationC64\\oscar64\\bin\\oscar64.exe",
             "args": [
                 "-O1",
