@@ -113,6 +113,20 @@ const uint8_t sprite_enemy[64] = {
     0x00
 };
 
+
+#pragma section( music, 0)
+
+#pragma region( music, 0xa000, 0xc000, , , {music} )
+
+#pragma data(music)
+
+__export const char music[] = {
+	#embed 0x2000 0x7e "./assets/music.sid" 
+};
+
+#pragma data(data)
+
+
 /*=============================================================================
  *  Adresses mémoire
  *============================================================================*/
@@ -238,10 +252,14 @@ static bool enemyCanSeePlayer(Enemy *e);
 static void playerTakeDamage(int knockbackDir);
 static void drawHUD(void);
 static void irq_hud(void);
+static void irq_logic(void);
+__interrupt static void irq_music(void);
 static void drawBottomPanel(void);
 static void irq_bottom(void);
 static void spawnLevelEnemies(void);
 static void drawNumber(char *row, char *colorRow, int pos, int value, int digits);
+void music_init(char subtune);
+void music_play(void);
 
 /*=============================================================================
  *  Stubs (à implémenter)
@@ -774,6 +792,27 @@ static void drawNumber(char *row, char *colorRow, int pos, int value, int digits
 }
 
 /*=============================================================================
+ *  MUSIC
+ *============================================================================*/
+
+void music_init(char subtune)
+{
+	__asm
+	{
+		lda		subtune
+		jsr		$afb2
+	}
+}
+
+void music_play(void)
+{
+	__asm
+	{
+		jsr		$a012
+	}
+}
+
+/*=============================================================================
  *  IRQ raster
  *============================================================================*/
 
@@ -784,8 +823,7 @@ static void irq_hud(void)
 
 static void irq_bottom(void)
 {
-    vic.color_back = VCOL_DARK_GREY;
-    //vic.color_border = VCOL_DARK_GREY;
+    vic.color_back = VCOL_DARK_GREY;    
 }
 
 static void irq_logic(void)
@@ -794,27 +832,38 @@ static void irq_logic(void)
     vic.color_border = VCOL_BLACK;
 }
 
+__interrupt static void irq_music(void)
+{
+    music_play();
+}
+
 static void init_irq(void)
 {
-    rirq_init(true);    
+    rirq_init(true);   
 
     // --- IRQ HUD (ligne 30) ---
     RIRQCode *hud = rirq_alloc(2);
-    rirq_build(hud, 2);
-    rirq_call(hud, 1, irq_hud);
+    rirq_build(hud, 1);
+    rirq_call(hud, 0, irq_hud);
     rirq_set(0, 30, hud);
 
     // --- IRQ bandeau bas (ligne 215) ---
     RIRQCode *bottom = rirq_alloc(2);
-    rirq_build(bottom, 2);
-    rirq_call(bottom, 1, irq_bottom);
+    rirq_build(bottom, 1);
+    rirq_call(bottom, 0, irq_bottom);
     rirq_set(1, 225, bottom);
 
     // --- IRQ logique du jeu (ligne 240) ---
     RIRQCode *logic = rirq_alloc(2);
-    rirq_build(logic, 2);
-    rirq_call(logic, 1, irq_logic);
+    rirq_build(logic, 1);
+    rirq_call(logic, 0, irq_logic);
     rirq_set(2, 250, logic);
+
+    // --- IRQ musique du jeu (ligne 10) ---
+    RIRQCode *music_rirq = rirq_alloc(2);
+    rirq_build(music_rirq, 1);
+	rirq_call(music_rirq, 0, irq_music);
+	rirq_set(3, 15, music_rirq);
 
     rirq_sort();
     rirq_start();
@@ -825,7 +874,8 @@ static void init_irq(void)
  *============================================================================*/
 
 int main(void)
-{
+{    
+    //rirq_init_kernal();
     hudDirty = 1;
     init_sprites();
     init_player();
@@ -833,15 +883,17 @@ int main(void)
     drawMap();
     drawBottomPanel();
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
+    music_init(1);
+
     init_irq();
 
     for (;;) {
-        vic_waitFrame();
+        vic_waitFrame();     
 
         updatePlayer();
         updateEnemies();
         updateLevelLogic();
-        updateSprites();
+        updateSprites();        
 
         if (hudDirty) {
             drawHUD();
