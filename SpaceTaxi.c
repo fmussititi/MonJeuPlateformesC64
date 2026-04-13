@@ -64,16 +64,32 @@
  *  Données Charpad
  *============================================================================*/
 
-const char Monde1Chars[] = {
-    #embed ctm_chars lzo "./assets/monde2.ctm"
+const char Monde1Chars[] = {   
+    #embed ctm_chars lzo "./assets/monde1.ctm" 
 };
-
 const char Monde1Map[] = {
+    #embed ctm_map8 lzo "./assets/monde1.ctm"
+};
+const char Monde1Color[] = {
+    #embed ctm_attr1 "./assets/monde1.ctm"
+};
+const char Monde2Chars[] = {   
+    #embed ctm_chars lzo "./assets/monde2.ctm" 
+};
+const char Monde2Map[] = {
     #embed ctm_map8 lzo "./assets/monde2.ctm"
 };
-
-const char Monde1Color[] = {
+const char Monde2Color[] = {
     #embed ctm_attr1 "./assets/monde2.ctm"
+};
+const char Monde3Chars[] = {   
+    #embed ctm_chars lzo "./assets/monde3.ctm" 
+};
+const char Monde3Map[] = {
+    #embed ctm_map8 lzo "./assets/monde3.ctm"
+};
+const char Monde3Color[] = {
+    #embed ctm_attr1 "./assets/monde3.ctm"
 };
 
 //const char Monde1Tiles[] = {
@@ -81,6 +97,7 @@ const char Monde1Color[] = {
 //};
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
+
 /*=============================================================================
  *  Données du sprite joueur  (24×21 pixels, multicolore échiqueté)
  *============================================================================*/
@@ -162,6 +179,11 @@ char * const SpriteRAM = (char *)0x3000;  /* données sprites (hors BASIC)     *
 
 static uint8_t sprite_base; /* index de bloc sprite (addr / 64)              */
 
+RIRQCode hud;
+RIRQCode game;
+RIRQCode bottom;
+RIRQCode rirq_music;
+
 /*=============================================================================
  *  État du joueur
  *============================================================================*/
@@ -217,8 +239,17 @@ typedef struct {
     struct {
         int x, y;
         int vx;
-    } enemies[MAX_ENEMIES];       /* ← ajout */
-    uint8_t enemyCount;           /* ← ajout */
+    } enemies[MAX_ENEMIES];
+    uint8_t enemyCount;
+
+    /* Données CharPad */
+    const char *chars;
+    const char *map;
+    const char *color;
+    uint8_t     color_back;   /* couleur de fond Bg0 */
+    uint8_t     color_back1;  /* M1 */
+    uint8_t     color_back2;  /* M2 */
+    uint8_t     color_border;
 } LevelData;
 
 /*=============================================================================
@@ -235,7 +266,14 @@ const LevelData levels[MAX_LEVELS] = {
         .platforms     = {{14, 10, 20}},
         .platformCount = 1,
         .enemies       = {{80, 0, 200}, {200, 0, -200}},
-        .enemyCount    = 2
+        .enemyCount    = 2,
+        .chars         = Monde1Chars,
+        .map           = Monde1Map,
+        .color         = Monde1Color,
+        .color_back    = VCOL_BROWN,
+        .color_back1   = VCOL_WHITE,
+        .color_back2   = VCOL_LT_GREY,
+        .color_border  = VCOL_CYAN
     },
     /* Niveau 1 */
     {
@@ -244,7 +282,14 @@ const LevelData levels[MAX_LEVELS] = {
         .platforms     = {{10, 5, 15}, {15, 25, 35}},
         .platformCount = 2,
         .enemies       = {{100, 0, 150}, {250, 0, -150}, {50, 0, 200}},
-        .enemyCount    = 3
+        .enemyCount    = 3,
+        .chars         = Monde2Chars,
+        .map           = Monde2Map,
+        .color         = Monde2Color,
+        .color_back    = VCOL_BROWN,
+        .color_back1   = VCOL_WHITE,
+        .color_back2   = VCOL_LT_GREY,
+        .color_border  = VCOL_CYAN
     },
     /* Niveau 2 */
     {
@@ -253,7 +298,14 @@ const LevelData levels[MAX_LEVELS] = {
         .platforms     = {{8, 2, 12}, {12, 18, 28}, {16, 30, 38}},
         .platformCount = 3,
         .enemies       = {{60, 0, 250}, {180, 0, -250}, {280, 0, 200}, {120, 0, -200}},
-        .enemyCount    = 4
+        .enemyCount    = 4,
+        .chars         = Monde3Chars,
+        .map           = Monde3Map,
+        .color         = Monde3Color,
+        .color_back    = VCOL_BROWN,
+        .color_back1   = VCOL_WHITE,
+        .color_back2   = VCOL_LT_GREY,
+        .color_border  = VCOL_CYAN
     }
 };
 
@@ -285,6 +337,7 @@ static void spawnLevelEnemies(void);
 static void drawNumber(char *row, char *colorRow, int pos, int value, int digits);
 void music_init(char subtune);
 void music_play(void);
+static void load_charpad_level(int levelIdx);
 
 /*=============================================================================
  *  Stubs (à implémenter)
@@ -389,9 +442,8 @@ void updatePlayer(void)
             playerIsDead = false;
 
             /* Recharger le niveau 0 */
+            load_charpad_level(0);
             loadLevel(&level1);
-            //memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
-            //drawMap();
             drawBottomPanel();
             spawnLevelEnemies();
         }
@@ -840,28 +892,27 @@ void music_play(void)
  *  CHARPAD données et init
  *============================================================================*/
 
-static void init_charpad(void)
+static void load_charpad_level(int levelIdx)
 {
-    mmap_set(MMAP_RAM);
- 
-    oscar_expand_lzo(Charset, Monde1Chars);
+    const LevelData *ld = &levels[levelIdx];
 
+    mmap_set(MMAP_RAM);
+    oscar_expand_lzo(Charset, ld->chars);
     mmap_set(MMAP_NO_BASIC);
 
-    oscar_expand_lzo(Screen, Monde1Map);
-    
+    oscar_expand_lzo(Screen, ld->map);
+
     char * const ColorRAM = (char *)0xD800;
-
-    /* Couleur par char + bit MC activé */
     for (int i = 0; i < 1000; i++)
-        ColorRAM[i] = (Monde1Color[(uint8_t)Screen[i]])| 0x08;
+        ColorRAM[i] = (ld->color[(uint8_t)Screen[i]]) | 0x08;
 
-    vic_setmode(VICM_TEXT_MC, Screen, Charset);
+    vic.color_back   = ld->color_back;
+    vic.color_back1  = ld->color_back1;
+    vic.color_back2  = ld->color_back2;
+    vic.color_border = ld->color_border;
 
-    vic.color_back  = VCOL_BROWN;    /* Bg0 = couleur des pixels "00" = marron */
-    vic.color_back1 = VCOL_WHITE;    /* M1  = blanc */
-    vic.color_back2 = VCOL_LT_GREY;  /* M2  = gris clair */
-    vic.color_border = VCOL_CYAN;   /* debug - doit correspondre au ciel */
+    /* Met à jour l'IRQ game avec la bonne couleur de fond */
+    rirq_data(&game, 2, ld->color_back);
 }
 
 /*=============================================================================
@@ -876,31 +927,27 @@ static void init_irq(void)
 {
     rirq_init_kernal();
 
-    RIRQCode hud;
     rirq_build(&hud, 3);
     rirq_write(&hud, 0, &vic.memptr,     0x15);
     rirq_write(&hud, 1, &vic.ctrl2,      0x08);
     rirq_write(&hud, 2, &vic.color_back, VCOL_CYAN);
     rirq_set(0, 48, &hud);
-
-    RIRQCode game;
+    
     rirq_build(&game, 3);
     rirq_write(&game, 0, &vic.memptr,     0x1e); // 7 * $800 = $3800 --> cf adresse chartset
     rirq_write(&game, 1, &vic.ctrl2,      0x18);
     rirq_write(&game, 2, &vic.color_back, VCOL_BROWN);
     rirq_set(1, 58, &game);
-
-    RIRQCode bottom;
+    
     rirq_build(&bottom, 3);
     rirq_write(&bottom, 0, &vic.memptr,     0x15);
     rirq_write(&bottom, 1, &vic.ctrl2,      0x08);
     rirq_write(&bottom, 2, &vic.color_back, VCOL_DARK_GREY);
     rirq_set(2, 242, &bottom);
-
-    RIRQCode music;
-    rirq_build(&music, 1);
-    rirq_call(&music, 0, irq_music);
-    rirq_set(3, 260, &music);
+    
+    rirq_build(&rirq_music, 1);
+    rirq_call(&rirq_music, 0, irq_music);
+    rirq_set(3, 260, &rirq_music);
 
     rirq_sort();
     rirq_start();
@@ -915,7 +962,10 @@ int main(void)
     hudDirty = 1;
     init_sprites();
     init_player();
-    init_charpad();    
+  
+    vic_setmode(VICM_TEXT_MC, Screen, Charset);
+    init_irq();           /* IRQ d'abord */
+    load_charpad_level(0); /* puis la map */
 
     loadLevel(&level1);
     //drawMap();
@@ -955,9 +1005,8 @@ int main(void)
             playerVy = 0;
             playerOnGround = false;
 
+            load_charpad_level(currentLevel);
             loadLevel(&level1);
-            //memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
-            //drawMap();
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }        
