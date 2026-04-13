@@ -61,6 +61,27 @@
 #define MAX_LEVELS 3
 
 /*=============================================================================
+ *  Données Charpad
+ *============================================================================*/
+
+const char Monde1Chars[] = {
+    #embed ctm_chars lzo "./assets/monde2.ctm"
+};
+
+const char Monde1Map[] = {
+    #embed ctm_map8 lzo "./assets/monde2.ctm"
+};
+
+const char Monde1Color[] = {
+    #embed ctm_attr1 "./assets/monde2.ctm"
+};
+
+//const char Monde1Tiles[] = {
+//    #embed ctm_tiles8sw lzo "./assets/monde2.ctm"
+//};
+
+char * const Charset = (char *)0x3800;  /* zone libre en RAM */
+/*=============================================================================
  *  Données du sprite joueur  (24×21 pixels, multicolore échiqueté)
  *============================================================================*/
 
@@ -114,6 +135,10 @@ const uint8_t sprite_enemy[64] = {
     0x00
 };
 
+
+/*=============================================================================
+ *  Données Musique
+ *============================================================================*/
 
 #pragma section( music, 0)
 
@@ -196,7 +221,6 @@ typedef struct {
     uint8_t enemyCount;           /* ← ajout */
 } LevelData;
 
-
 /*=============================================================================
  *  Données sur les niveaux du jeu
  *============================================================================*/
@@ -252,7 +276,7 @@ static bool checkCollisionAABB(int ax, int ay, int aw, int ah,
 static bool enemyCanSeePlayer(Enemy *e);
 static void playerTakeDamage(int knockbackDir);
 static void drawHUD(void);
-static void irq_hud(void);
+__interrupt static void irq_hud(void);
 static void irq_logic(void);
 __interrupt static void irq_music(void);
 static void drawBottomPanel(void);
@@ -287,9 +311,6 @@ static void init_sprites(void)
     memset(Screen, 32, 1000);
 
     spr_init(Screen);
-
-    vic.color_back   = VCOL_BLACK;
-    vic.color_border = VCOL_BLACK;
 
     /* Multicolore global activé pour tous les sprites */
     vic.spr_multi    = 0xFF;
@@ -369,8 +390,8 @@ void updatePlayer(void)
 
             /* Recharger le niveau 0 */
             loadLevel(&level1);
-            memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
-            drawMap();
+            //memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
+            //drawMap();
             drawBottomPanel();
             spawnLevelEnemies();
         }
@@ -618,12 +639,13 @@ static bool isSolidAtPixel(int px, int py)
 {
     if (py < 0) return false;
     int tx = px / 8;
-    int ty = py / 8;
+    int ty = (py / 8) + MAP_Y_OFF;   /* +1 pour la ligne HUD */
 
-    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H)
-        return false;   // ← tu sors probablement ici !
+    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= 25)
+        return false;
 
-    return (collisionMap[ty][tx] == TILE_SOLID);
+    uint8_t charIdx = (uint8_t)Screen[ty * 40 + tx];
+    return (charIdx != 0);   /* 0 = ciel = vide, tout le reste = solide */
 }
 
 static void drawMap(void)
@@ -707,7 +729,7 @@ static void drawHUD(void)
     // Efface la ligne
     for (int i = 0; i < 40; i++) {
         row[i]     = CHAR_EMPTY;
-        ColorRAM[i] = VCOL_BLACK;   /* fond noir = texte invisible */
+        ColorRAM[i] = VCOL_CYAN;   /* fond noir = texte invisible */
     }
 
     // Affiche les cœurs en rouge
@@ -725,8 +747,8 @@ static void drawHUD(void)
 static void drawBottomPanel(void)
 {
     char * const ColorRAM = (char *)0xD800;
-    char *row      = Screen   + (23 * 40);
-    char *colorRow = ColorRAM + (23 * 40);
+    char *row      = Screen   + (24 * 40);
+    char *colorRow = ColorRAM + (24 * 40);
 
     /* Efface la ligne */
     for (int i = 0; i < 40; i++) {
@@ -813,26 +835,38 @@ void music_play(void)
 	}
 }
 
+
+/*=============================================================================
+ *  CHARPAD données et init
+ *============================================================================*/
+
+static void init_charpad(void)
+{
+    mmap_set(MMAP_RAM);
+ 
+    oscar_expand_lzo(Charset, Monde1Chars);
+
+    mmap_set(MMAP_NO_BASIC);
+
+    oscar_expand_lzo(Screen, Monde1Map);
+    
+    char * const ColorRAM = (char *)0xD800;
+
+    /* Couleur par char + bit MC activé */
+    for (int i = 0; i < 1000; i++)
+        ColorRAM[i] = (Monde1Color[(uint8_t)Screen[i]])| 0x08;
+
+    vic_setmode(VICM_TEXT_MC, Screen, Charset);
+
+    vic.color_back  = VCOL_BROWN;    /* Bg0 = couleur des pixels "00" = marron */
+    vic.color_back1 = VCOL_WHITE;    /* M1  = blanc */
+    vic.color_back2 = VCOL_LT_GREY;  /* M2  = gris clair */
+    vic.color_border = VCOL_CYAN;   /* debug - doit correspondre au ciel */
+}
+
 /*=============================================================================
  *  IRQ raster
  *============================================================================*/
-
-static void irq_hud(void)
-{
-    vic.color_back = VCOL_LT_GREY;
-}
-
-static void irq_bottom(void)
-{
-    vic.color_back = VCOL_DARK_GREY;    
-}
-
-static void irq_logic(void)
-{
-    vic.color_back = VCOL_WHITE;
-    vic.color_border = VCOL_BLACK;
-}
-
 __interrupt static void irq_music(void)
 {
     music_play();
@@ -840,31 +874,33 @@ __interrupt static void irq_music(void)
 
 static void init_irq(void)
 {
-    rirq_init(true);   
+    rirq_init_kernal();
 
-    // --- IRQ HUD (ligne 30) ---
-    RIRQCode *hud = rirq_alloc(2);
-    rirq_build(hud, 1);
-    rirq_call(hud, 0, irq_hud);
-    rirq_set(0, 30, hud);
+    RIRQCode hud;
+    rirq_build(&hud, 3);
+    rirq_write(&hud, 0, &vic.memptr,     0x15);
+    rirq_write(&hud, 1, &vic.ctrl2,      0x08);
+    rirq_write(&hud, 2, &vic.color_back, VCOL_CYAN);
+    rirq_set(0, 48, &hud);
 
-    // --- IRQ bandeau bas (ligne 225) ---
-    RIRQCode *bottom = rirq_alloc(2);
-    rirq_build(bottom, 1);
-    rirq_call(bottom, 0, irq_bottom);
-    rirq_set(1, 225, bottom);
+    RIRQCode game;
+    rirq_build(&game, 3);
+    rirq_write(&game, 0, &vic.memptr,     0x1e); // 7 * $800 = $3800 --> cf adresse chartset
+    rirq_write(&game, 1, &vic.ctrl2,      0x18);
+    rirq_write(&game, 2, &vic.color_back, VCOL_BROWN);
+    rirq_set(1, 58, &game);
 
-    // --- IRQ logique du jeu (ligne 250) ---
-    RIRQCode *logic = rirq_alloc(2);
-    rirq_build(logic, 1);
-    rirq_call(logic, 0, irq_logic);
-    rirq_set(2, 250, logic);
+    RIRQCode bottom;
+    rirq_build(&bottom, 3);
+    rirq_write(&bottom, 0, &vic.memptr,     0x15);
+    rirq_write(&bottom, 1, &vic.ctrl2,      0x08);
+    rirq_write(&bottom, 2, &vic.color_back, VCOL_DARK_GREY);
+    rirq_set(2, 242, &bottom);
 
-    // --- IRQ musique du jeu (ligne 10) ---
-    RIRQCode *music_rirq = rirq_alloc(2);
-    rirq_build(music_rirq, 1);
-	rirq_call(music_rirq, 0, irq_music);
-	rirq_set(3, 10, music_rirq);
+    RIRQCode music;
+    rirq_build(&music, 1);
+    rirq_call(&music, 0, irq_music);
+    rirq_set(3, 260, &music);
 
     rirq_sort();
     rirq_start();
@@ -879,8 +915,10 @@ int main(void)
     hudDirty = 1;
     init_sprites();
     init_player();
+    init_charpad();    
+
     loadLevel(&level1);
-    drawMap();
+    //drawMap();
     drawBottomPanel();
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
     music_init(1);
@@ -893,7 +931,7 @@ int main(void)
         updatePlayer();
         updateEnemies();
         updateLevelLogic();
-        updateSprites();               
+        updateSprites();        
 
         if (hudDirty) {
             drawHUD();
@@ -918,8 +956,8 @@ int main(void)
             playerOnGround = false;
 
             loadLevel(&level1);
-            memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
-            drawMap();
+            //memset(Screen + MAP_Y_OFF * 40, CHAR_EMPTY, MAP_H * 40);
+            //drawMap();
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }        
