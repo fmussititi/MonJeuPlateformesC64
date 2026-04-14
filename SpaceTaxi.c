@@ -77,6 +77,12 @@ const char Monde1Tiles[] = {
     #embed ctm_tiles8 "./assets/monde_tiles1.ctm"
 };
 
+static const uint8_t Monde1Collision[30] = {
+    0,0,0,0,0,0, 0,0,0,0,0,0,
+    0,0,0,0,1,1, 1,1,1,1,1,1,
+    1,1,1,1,1,1  // tiles 15–25 = montagne
+};
+
 const char Monde2Chars[] = {   
     #embed ctm_chars lzo "./assets/monde_tiles2.ctm" 
 };
@@ -88,6 +94,10 @@ const char Monde2Color[] = {
 };
 const char Monde2Tiles[] = {
     #embed ctm_tiles8 "./assets/monde_tiles2.ctm"
+};
+
+static const uint8_t Monde2Collision[23] = {
+    0,0,0,0,0,0, 0,0,0,0,0,0 ,0,0,1,1,1,1, 1,1,1,1,1
 };
 
 const char Monde3Chars[] = {   
@@ -102,6 +112,12 @@ const char Monde3Color[] = {
 const char Monde3Tiles[] = {
     #embed ctm_tiles8 "./assets/monde_tiles3.ctm"
 };
+
+static const uint8_t Monde3Collision[18] = {
+    0,0,0,0,0,0, 0,0,0,0,0,0 ,0,0,0,1,1,1
+};
+
+static char mapBuffer[60];
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
 
@@ -216,12 +232,6 @@ static uint8_t hudDirty;
 /*=============================================================================
  *  Structs
  *============================================================================*/
-
-typedef struct {
-    int niveau;
-} Level;
-
-static Level level1;
 static bool  needLevelChange = false;
 
 typedef struct {
@@ -235,14 +245,6 @@ typedef struct {
 } Enemy;
 
 typedef struct {
-    uint8_t solidRows[8];
-    uint8_t solidRowCount;
-    struct {
-        uint8_t row;
-        uint8_t xStart;
-        uint8_t xEnd;
-    } platforms[4];
-    uint8_t platformCount;
     struct {
         int x, y;
         int vx;
@@ -254,6 +256,7 @@ typedef struct {
     const char *map;
     const char *tiles;
     const char *color;
+    const uint8_t *tileCollision;
     uint8_t     color_back;   /* couleur de fond Bg0 */
     uint8_t     color_back1;  /* M1 */
     uint8_t     color_back2;  /* M2 */
@@ -269,16 +272,13 @@ static int currentLevel = 0;
 const LevelData levels[MAX_LEVELS] = {
     /* Niveau 0 */
     {
-        .solidRows     = {20},
-        .solidRowCount = 1,
-        .platforms     = {{14, 10, 20}},
-        .platformCount = 1,
         .enemies       = {{80, 0, 200}, {200, 0, -200}},
         .enemyCount    = 2,
         .chars         = Monde1Chars,
         .map           = Monde1Map,
         .tiles         = Monde1Tiles,
         .color         = Monde1Color,
+        .tileCollision = Monde1Collision,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -286,16 +286,13 @@ const LevelData levels[MAX_LEVELS] = {
     },
     /* Niveau 1 */
     {
-        .solidRows     = {20},
-        .solidRowCount = 1,
-        .platforms     = {{10, 5, 15}, {15, 25, 35}},
-        .platformCount = 2,
         .enemies       = {{100, 0, 150}, {250, 0, -150}, {50, 0, 200}},
         .enemyCount    = 3,
         .chars         = Monde2Chars,
         .map           = Monde2Map,
         .tiles         = Monde2Tiles,
         .color         = Monde2Color,
+        .tileCollision = Monde2Collision,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -303,16 +300,13 @@ const LevelData levels[MAX_LEVELS] = {
     },
     /* Niveau 2 */
     {
-        .solidRows     = {20},
-        .solidRowCount = 1,
-        .platforms     = {{8, 2, 12}, {12, 18, 28}, {16, 30, 38}},
-        .platformCount = 3,
         .enemies       = {{60, 0, 250}, {180, 0, -250}, {280, 0, 200}, {120, 0, -200}},
         .enemyCount    = 4,
         .chars         = Monde3Chars,
         .map           = Monde3Map,
         .tiles         = Monde3Tiles,
         .color         = Monde3Color,
+        .tileCollision = Monde3Collision,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -329,8 +323,9 @@ void spawnEnemy(int id, int x, int y, long vx);
 void updateEnemies(void);
 void updateLevelLogic(void);
 void updateSprites(void);
-void loadLevel(Level *level);
+
 void applyPatches(void);
+
 static bool isSolidAtPixel(int px, int py);
 static void drawMap(void);
 static void init_sprites(void);
@@ -345,6 +340,7 @@ __interrupt static void irq_music(void);
 static void drawBottomPanel(void);
 static void irq_bottom(void);
 static void spawnLevelEnemies(void);
+
 static void drawNumber(char *row, char *colorRow, int pos, int value, int digits);
 void music_init(char subtune);
 void music_play(void);
@@ -455,7 +451,6 @@ void updatePlayer(void)
 
             /* Recharger le niveau 0 */
             load_charpad_level(0);
-            loadLevel(&level1);
             drawBottomPanel();
             spawnLevelEnemies();
         }
@@ -697,29 +692,54 @@ static void spawnLevelEnemies(void)
 /*=============================================================================
  *  Logique de collision
  *============================================================================*/
-static uint8_t collisionMap[MAP_H][MAP_W];
+static void debugTileIndexBottom(int tileIndex, uint8_t coll)
+{
+    char *row      = Screen   + (24 * 40);
+    char *colorRow = (char*)0xD800 + (24 * 40);
+
+    int v = tileIndex;
+
+    row[35] = '0' + (v / 10);
+    row[36] = '0' + (v % 10);
+
+    colorRow[35] = VCOL_CYAN;
+    colorRow[36] = VCOL_CYAN;
+}
+
+void drawDebugColumns(void)
+{
+    for (int x = 0; x < 10; x++) {
+        int px = x * 32;
+        int cx = px / 8;
+
+        for (int y = 1; y < 23; y++) {   // du haut au bas
+            Screen[y * 40 + cx] = 29;   // tile plein
+            ((char*)0xD800)[y * 40 + cx] = VCOL_RED;
+        }
+    }
+}
+
 
 static bool isSolidAtPixel(int px, int py)
 {
-    if (py < 0) return false;
-    int tx = px / 8;
-    int ty = (py / 8) + MAP_Y_OFF;   /* +1 pour la ligne HUD */
+    int worldY = py - 8;  // HUD = 8 pixels
 
-    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= 25)
+    if (worldY < 0) return false;
+
+    int tileX = px >> 5;  // largeur = 16 px
+    int tileY = py >> 5;  // hauteur = 32 px (4 chars)
+
+    if (tileX < 0 || tileX >= 10 || tileY < 0 || tileY >= 6)
         return false;
 
-    uint8_t charIdx = (uint8_t)Screen[ty * 40 + tx];
-    return (charIdx != 0);   /* 0 = ciel = vide, tout le reste = solide */
-}
+    const LevelData *ld = &levels[currentLevel];
 
-static void drawMap(void)
-{
-    for (int ty = 0; ty < MAP_H; ++ty) {
-        for (int tx = 0; tx < MAP_W; ++tx) {
-            char c = (collisionMap[ty][tx] == TILE_SOLID) ? CHAR_SOLID : CHAR_EMPTY;
-            Screen[(ty + MAP_Y_OFF) * MAP_W + tx] = c;
-        }
-    }
+    uint8_t tileIndex = mapBuffer[tileY * 10 + tileX + 1];
+    uint8_t coll      = ld->tileCollision[tileIndex];
+
+    debugTileIndexBottom(tileIndex, coll);
+
+    return (coll != 0);
 }
 
 static bool checkCollisionAABB(int ax, int ay, int aw, int ah,
@@ -841,6 +861,15 @@ static void drawBottomPanel(void)
         colorRow[20 + i] = VCOL_WHITE;
     }
     drawNumber(row, colorRow, 27, currentLevel + 1, 1);
+
+    /* --- DEBUG TILE INDEX --- */
+    const char *dbg = "T:";
+    for (int i = 0; dbg[i]; i++) {
+        char c = dbg[i];
+        if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
+        row[33 + i]      = c;
+        colorRow[33 + i] = VCOL_YELLOW;
+    }
 }
 
 static void drawNumber(char *row, char *colorRow, int pos, int value, int digits)
@@ -853,29 +882,6 @@ static void drawNumber(char *row, char *colorRow, int pos, int value, int digits
         row[pos + i]      = c;
         colorRow[pos + i] = VCOL_YELLOW;
     }
-}
-
-/*=============================================================================
- *  CHARGEMENT DYNAMIQUE DES NIVEAUX
- *============================================================================*/
-
- void loadLevel(Level *level)
-{
-    (void)level;
-
-    const LevelData *ld = &levels[currentLevel];
-
-    memset(collisionMap, TILE_EMPTY, sizeof(collisionMap));
-
-    /* Sol */
-    for (int r = 0; r < ld->solidRowCount; r++)
-        for (int x = 0; x < MAP_W; x++)
-            collisionMap[ld->solidRows[r]][x] = TILE_SOLID;
-
-    /* Plateformes */
-    for (int p = 0; p < ld->platformCount; p++)
-        for (int x = ld->platforms[p].xStart; x < ld->platforms[p].xEnd; x++)
-            collisionMap[ld->platforms[p].row][x] = TILE_SOLID;
 }
 
 /*=============================================================================
@@ -912,10 +918,8 @@ static void load_charpad_level(int levelIdx)
     oscar_expand_lzo(Charset, ld->chars);
     mmap_set(MMAP_NO_BASIC);
 
-    //oscar_expand_lzo(Screen, ld->map);
     memset(Screen, 0, 1000);
 
-    static char mapBuffer[60];
     oscar_expand_lzo(mapBuffer, ld->map);
 
     tile_expand_map(mapBuffer, ld->tiles);
@@ -1007,7 +1011,6 @@ int main(void)
     vic_setmode(VICM_TEXT_MC, Screen, Charset);
     load_charpad_level(0); /* puis la map */
 
-    loadLevel(&level1);
     drawBottomPanel();
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
     music_init(1);
@@ -1020,7 +1023,8 @@ int main(void)
         updatePlayer();
         updateEnemies();
         updateLevelLogic();
-        updateSprites();        
+        updateSprites();
+        //drawDebugColumns();        
 
         if (hudDirty) {
             drawHUD();
@@ -1045,7 +1049,6 @@ int main(void)
             playerOnGround = false;
 
             load_charpad_level(currentLevel);
-            loadLevel(&level1);
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }        
