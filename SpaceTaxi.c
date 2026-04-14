@@ -65,59 +65,64 @@
  *============================================================================*/
 
 const char Monde1Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles1.ctm" 
+    #embed ctm_chars lzo "./assets/monde_tiles1_1x1.ctm" 
 };
 const char Monde1Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles1.ctm"
+    #embed ctm_map8 lzo "./assets/monde_tiles1_1x1.ctm"
 };
 const char Monde1Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles1.ctm"
+    #embed ctm_attr1 "./assets/monde_tiles1_1x1.ctm"
 };
 const char Monde1Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles1.ctm"
+    #embed ctm_tiles8 "./assets/monde_tiles1_1x1.ctm"
 };
 
-static const uint8_t Monde1Collision[30] = {
-    0,0,0,0,0,0, 0,0,0,0,0,0,
-    0,0,0,0,1,1, 1,1,1,1,1,1,
-    1,1,1,1,1,1  // tiles 15–25 = montagne
+static const uint8_t Monde1Collision[5] = {
+    0,0,0,1,0
 };
 
 const char Monde2Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles2.ctm" 
+    #embed ctm_chars lzo "./assets/monde_tiles2_1x1.ctm" 
 };
 const char Monde2Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles2.ctm"
+    #embed ctm_map8 lzo "./assets/monde_tiles2_1x1.ctm"
 };
 const char Monde2Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles2.ctm"
+    #embed ctm_attr1 "./assets/monde_tiles2_1x1.ctm"
 };
 const char Monde2Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles2.ctm"
+    #embed ctm_tiles8 "./assets/monde_tiles2_1x1.ctm"
 };
 
-static const uint8_t Monde2Collision[23] = {
-    0,0,0,0,0,0, 0,0,0,0,0,0 ,0,0,1,1,1,1, 1,1,1,1,1
+static const uint8_t Monde2Collision[4] = {
+    0,0,1,0
 };
 
 const char Monde3Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles3.ctm" 
+    #embed ctm_chars lzo "./assets/monde_tiles3_1x1.ctm" 
 };
 const char Monde3Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles3.ctm"
+    #embed ctm_map8 lzo "./assets/monde_tiles3_1x1.ctm"
 };
 const char Monde3Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles3.ctm"
+    #embed ctm_attr1 "./assets/monde_tiles3_1x1.ctm"
 };
 const char Monde3Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles3.ctm"
+    #embed ctm_tiles8 "./assets/monde_tiles3_1x1.ctm"
 };
 
-static const uint8_t Monde3Collision[18] = {
-    0,0,0,0,0,0, 0,0,0,0,0,0 ,0,0,0,1,1,1
+static const uint8_t Monde3Collision[6] = {
+    0,0,0,0,1,0
 };
 
-static char mapBuffer[60];
+static char mapBuffer[40*25];
+static char* mapDecomp1;
+static char* mapDecomp2;
+static char* mapDecomp3;
+
+static char charsDecomp1[2048];
+static char charsDecomp2[2048];
+static char charsDecomp3[2048];
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
 
@@ -256,6 +261,8 @@ typedef struct {
     const char *map;
     const char *tiles;
     const char *color;
+    char *mapDecomp;     // pointeur vers map décompressée
+    char *charsDecomp;   // pointeur vers charset décompressé
     const uint8_t *tileCollision;
     uint8_t     color_back;   /* couleur de fond Bg0 */
     uint8_t     color_back1;  /* M1 */
@@ -269,7 +276,7 @@ typedef struct {
 
 static int currentLevel = 0;
 
-const LevelData levels[MAX_LEVELS] = {
+LevelData levels[MAX_LEVELS] = {
     /* Niveau 0 */
     {
         .enemies       = {{80, 0, 200}, {200, 0, -200}},
@@ -279,6 +286,8 @@ const LevelData levels[MAX_LEVELS] = {
         .tiles         = Monde1Tiles,
         .color         = Monde1Color,
         .tileCollision = Monde1Collision,
+        .charsDecomp   = charsDecomp1,
+        .mapDecomp     = NULL,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -293,6 +302,8 @@ const LevelData levels[MAX_LEVELS] = {
         .tiles         = Monde2Tiles,
         .color         = Monde2Color,
         .tileCollision = Monde2Collision,
+        .charsDecomp   = charsDecomp2,
+        .mapDecomp     = NULL,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -307,6 +318,8 @@ const LevelData levels[MAX_LEVELS] = {
         .tiles         = Monde3Tiles,
         .color         = Monde3Color,
         .tileCollision = Monde3Collision,
+        .charsDecomp   = charsDecomp3,
+        .mapDecomp     = NULL,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -360,7 +373,7 @@ void applyPatches(void)     {}
 
 static void init_sprites(void)
 {
-    mmap_trampoline();
+    //mmap_trampoline();
     mmap_set(MMAP_RAM);
     mmap_set(MMAP_NO_BASIC);
 
@@ -450,7 +463,7 @@ void updatePlayer(void)
             playerIsDead = false;
 
             /* Recharger le niveau 0 */
-            load_charpad_level(0);
+            load_charpad_level(0); /* puis la map */  
             drawBottomPanel();
             spawnLevelEnemies();
         }
@@ -708,8 +721,8 @@ static void debugTileIndexBottom(int tileIndex, uint8_t coll)
 
 void drawDebugColumns(void)
 {
-    for (int x = 0; x < 10; x++) {
-        int px = x * 32;
+    for (int x = 0; x < 40; x++) {
+        int px = x * 8;
         int cx = px / 8;
 
         for (int y = 1; y < 23; y++) {   // du haut au bas
@@ -726,18 +739,18 @@ static bool isSolidAtPixel(int px, int py)
 
     if (worldY < 0) return false;
 
-    int tileX = px >> 5;  // largeur = 16 px
-    int tileY = py >> 5;  // hauteur = 32 px (4 chars)
+    int tileX = px >> 3;  // largeur = 16 px
+    int tileY = py >> 3;  // hauteur = 32 px (4 chars)
 
-    if (tileX < 0 || tileX >= 10 || tileY < 0 || tileY >= 6)
+    if (tileX < 0 || tileX >= 40 || tileY < 0 || tileY >= 25)
         return false;
 
     const LevelData *ld = &levels[currentLevel];
 
-    uint8_t tileIndex = mapBuffer[tileY * 10 + tileX + 1];
+    uint8_t tileIndex = mapBuffer[tileY * 40 + tileX];
     uint8_t coll      = ld->tileCollision[tileIndex];
 
-    debugTileIndexBottom(tileIndex, coll);
+    //debugTileIndexBottom(tileIndex, coll);
 
     return (coll != 0);
 }
@@ -863,6 +876,7 @@ static void drawBottomPanel(void)
     drawNumber(row, colorRow, 27, currentLevel + 1, 1);
 
     /* --- DEBUG TILE INDEX --- */
+    /*
     const char *dbg = "T:";
     for (int i = 0; dbg[i]; i++) {
         char c = dbg[i];
@@ -870,6 +884,7 @@ static void drawBottomPanel(void)
         row[33 + i]      = c;
         colorRow[33 + i] = VCOL_YELLOW;
     }
+    */
 }
 
 static void drawNumber(char *row, char *colorRow, int pos, int value, int digits)
@@ -914,13 +929,13 @@ static void load_charpad_level(int levelIdx)
 {
     const LevelData *ld = &levels[levelIdx];
 
-    mmap_set(MMAP_RAM);
-    oscar_expand_lzo(Charset, ld->chars);
-    mmap_set(MMAP_NO_BASIC);
+    // Copie du charset déjà décompressé
+    memcpy(Charset, ld->charsDecomp, 2048);
+
+    // Copie de la map déjà décompressée
+    memcpy(mapBuffer, ld->mapDecomp, 40*25);
 
     memset(Screen, 0, 1000);
-
-    oscar_expand_lzo(mapBuffer, ld->map);
 
     tile_expand_map(mapBuffer, ld->tiles);
 
@@ -939,26 +954,14 @@ static void load_charpad_level(int levelIdx)
 
 void tile_expand_map(char* map, const char* tiles)
 {
+    char *sp = Screen + 40;   // début map
     const char *mp = map;
-    char *sp = Screen + 40;   // ligne 1, après HUD 
 
-    for (char y = 0; y < 6; y++) {
-        for (char x = 0; x < 10; x++) {
-            const char *tp = tiles + 16 * (uint8_t)mp[x];
-
-            #pragma unroll(full)
-            for (char iy = 0; iy < 4; iy++) {
-                #pragma unroll(full)
-                for (char ix = 0; ix < 4; ix++) {
-                    sp[40 * iy + ix] = tp[4 * iy + ix];
-                }
-            }
-            sp += 4;      // tile suivante : 4 chars à droite 
-        }
-        mp += 10;         // ligne suivante de tiles 
-        sp += 40 * 3;     // 3 lignes de chars supplémentaires 
+    for (int i = 0; i < 40 * 23; i++) {
+        sp[i] = tiles[(uint8_t)mp[i]];
     }
 }
+
 
 /*=============================================================================
  *  IRQ raster
@@ -1003,7 +1006,24 @@ static void init_irq(void)
  *============================================================================*/
 
 int main(void)
-{    
+{ 
+    mmap_trampoline();  
+    mmap_set(MMAP_RAM);
+    oscar_expand_lzo(charsDecomp1, Monde1Chars);
+    oscar_expand_lzo(charsDecomp2, Monde2Chars);
+    oscar_expand_lzo(charsDecomp3, Monde3Chars);
+    mmap_set(MMAP_ROM);
+
+    mapDecomp1 = (char*)malloc(1000 * sizeof(char));
+    levels[0].mapDecomp = mapDecomp1;
+    oscar_expand_lzo(mapDecomp1, Monde1Map);
+    mapDecomp2 = (char*)malloc(1000 * sizeof(char));
+    levels[1].mapDecomp = mapDecomp2;
+    oscar_expand_lzo(mapDecomp2, Monde2Map);
+    mapDecomp3 = (char*)malloc(1000 * sizeof(char));
+    levels[2].mapDecomp = mapDecomp3;
+    oscar_expand_lzo(mapDecomp3, Monde3Map);
+
     hudDirty = 1;
     init_sprites();
     init_player();
@@ -1048,9 +1068,12 @@ int main(void)
             playerVy = 0;
             playerOnGround = false;
 
-            load_charpad_level(currentLevel);
+            load_charpad_level(currentLevel); 
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }        
     }
+    free(mapDecomp1);
+    free(mapDecomp2);
+    free(mapDecomp3);
 }
