@@ -116,13 +116,14 @@ static const uint8_t Monde3Collision[6] = {
 };
 
 static char mapBuffer[40*25];
-static char* mapDecomp1;
-static char* mapDecomp2;
-static char* mapDecomp3;
 
-static char charsDecomp1[2048];
-static char charsDecomp2[2048];
-static char charsDecomp3[2048];
+char * const mapDecomp1 = (char *)0x6800;  // 1000 octets
+char * const mapDecomp2 = (char *)0x6C00;  // 1000 octets  
+char * const mapDecomp3 = (char *)0x7000;  // 1000 octets
+
+char * const charsDecomp1 = (char *)0x5000;  // après heap node $4778
+char * const charsDecomp2 = (char *)0x5800;
+char * const charsDecomp3 = (char *)0x6000;
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
 
@@ -287,7 +288,7 @@ LevelData levels[MAX_LEVELS] = {
         .color         = Monde1Color,
         .tileCollision = Monde1Collision,
         .charsDecomp   = charsDecomp1,
-        .mapDecomp     = NULL,
+        .mapDecomp     = mapDecomp1,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -303,7 +304,7 @@ LevelData levels[MAX_LEVELS] = {
         .color         = Monde2Color,
         .tileCollision = Monde2Collision,
         .charsDecomp   = charsDecomp2,
-        .mapDecomp     = NULL,
+        .mapDecomp     = mapDecomp2,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -319,7 +320,7 @@ LevelData levels[MAX_LEVELS] = {
         .color         = Monde3Color,
         .tileCollision = Monde3Collision,
         .charsDecomp   = charsDecomp3,
-        .mapDecomp     = NULL,
+        .mapDecomp     = mapDecomp3,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -546,6 +547,71 @@ void updatePlayer(void)
     else if (playerVy < 0) {
         // collision tête avec plafond (plus tard)
     }
+
+    // --- Auto-franchissement horizontal (safe) ---
+    if (playerVx > 0) {
+        int rightX = playerX + PLAYER_WIDTH - 1;
+
+        // collision murale ?
+        if (isSolidAtPixel(rightX, playerY + 4) ||
+            isSolidAtPixel(rightX, playerY + PLAYER_HEIGHT - 4)) {
+
+            // Conditions de sécurité
+            if (playerVy > 0) goto blockRight;        // on tombe → pas de step-up
+            if (playerY <= 2) goto blockRight;        // trop haut → pas de step-up
+            if (isSolidAtPixel(rightX, playerY - 4)) goto blockRight; // plafond
+
+            // Step-up 1 à 4 pixels
+            for (int step = 1; step <= 4; step++) {
+                if (!isSolidAtPixel(rightX, playerY - step)) {
+                    playerY  -= step;
+                    playerYf -= (step << 8);
+                    goto endRight;
+                }
+            }
+
+    blockRight:
+            // Blocage normal
+            playerX  = (rightX / 8) * 8 - PLAYER_WIDTH;
+            playerXf = (long)playerX << 8;
+            playerVx = 0;
+
+    endRight:
+            ;
+        }
+    }
+    // Collision murale à gauche
+    if (playerVx < 0) {
+        int leftX = playerX;
+
+        // collision murale ?
+        if (isSolidAtPixel(leftX, playerY + 4) ||
+            isSolidAtPixel(leftX, playerY + PLAYER_HEIGHT - 4)) {
+
+            // Conditions de sécurité
+            if (playerVy > 0) goto blockLeft;        // on tombe → pas de step-up
+            if (playerY <= 2) goto blockLeft;        // trop haut → pas de step-up
+            if (isSolidAtPixel(leftX, playerY - 4)) goto blockLeft; // plafond
+
+            // Step-up 1 à 4 pixels
+            for (int step = 1; step <= 4; step++) {
+                if (!isSolidAtPixel(leftX, playerY - step)) {
+                    playerY  -= step;
+                    playerYf -= (step << 8);
+                    goto endLeft;
+                }
+            }
+
+    blockLeft:
+            // Blocage normal
+            playerX  = (leftX / 8 + 1) * 8;
+            playerXf = (long)playerX << 8;
+            playerVx = 0;
+
+    endLeft:
+            ;
+        }
+    }
 }
 
 /*=============================================================================
@@ -601,6 +667,68 @@ void updateEnemies(void)
         e->x = e->xf >> 8;
         e->y = e->yf >> 8;
 
+        /* --- Auto-franchissement horizontal (safe) --- */
+        if (e->vx > 0) {
+            int rightX = e->x + ENEMIES_WIDTH - 1;
+
+            // collision murale ?
+            if (isSolidAtPixel(rightX, e->y + 4) ||
+                isSolidAtPixel(rightX, e->y + ENEMIES_HEIGHT - 4)) {
+
+                // Conditions de sécurité
+                if (e->vy > 0) goto blockRight;        // en chute → pas de step-up
+                if (e->y <= 2) goto blockRight;        // trop haut → pas de step-up
+                if (isSolidAtPixel(rightX, e->y - 4)) goto blockRight; // plafond
+
+                // Step-up 1 à 4 pixels
+                for (int step = 1; step <= 4; step++) {
+                    if (!isSolidAtPixel(rightX, e->y - step)) {
+                        e->y  -= step;
+                        e->yf -= (step << 8);
+                        goto endRight;
+                    }
+                }
+
+        blockRight:
+                // Demi-tour propre
+                e->vx = -e->vx;
+                e->xf = (long)e->x << 8;
+
+        endRight:
+                ;
+            }
+        }
+        else if (e->vx < 0) {
+            int leftX = e->x;
+
+            // collision murale ?
+            if (isSolidAtPixel(leftX, e->y + 4) ||
+                isSolidAtPixel(leftX, e->y + ENEMIES_HEIGHT - 4)) {
+
+                // Conditions de sécurité
+                if (e->vy > 0) goto blockLeft;        // en chute → pas de step-up
+                if (e->y <= 2) goto blockLeft;        // trop haut → pas de step-up
+                if (isSolidAtPixel(leftX, e->y - 4)) goto blockLeft; // plafond
+
+                // Step-up 1 à 4 pixels
+                for (int step = 1; step <= 4; step++) {
+                    if (!isSolidAtPixel(leftX, e->y - step)) {
+                        e->y  -= step;
+                        e->yf -= (step << 8);
+                        goto endLeft;
+                    }
+                }
+
+        blockLeft:
+                // Demi-tour propre
+                e->vx = -e->vx;
+                e->xf = (long)e->x << 8;
+
+        endLeft:
+                ;
+            }
+        }
+
         /* --- Bord de plateforme → demi-tour (patrouille seulement) --- */
         if (e->aiMode == AI_PATROL) {
             int lookX   = e->x + ((e->vx > 0) ? ENEMIES_WIDTH : -1);
@@ -619,7 +747,7 @@ void updateEnemies(void)
             e->y  = newFeetY - ENEMIES_HEIGHT;
             e->yf = (long)e->y << 8;
             e->vy = 0;
-        }
+        } 
 
         /* --- Garde-fou bas de map --- */
         if (e->yf > ((long)(WORLD_MAX_Y) << 8)) {
@@ -666,7 +794,7 @@ void updateEnemies(void)
                     playerTakeDamage(dir);
                 }
             }
-        }
+        }        
     }
 }
 
@@ -1014,15 +1142,10 @@ int main(void)
     oscar_expand_lzo(charsDecomp3, Monde3Chars);
     mmap_set(MMAP_ROM);
 
-    mapDecomp1 = (char*)malloc(1000 * sizeof(char));
-    levels[0].mapDecomp = mapDecomp1;
     oscar_expand_lzo(mapDecomp1, Monde1Map);
-    mapDecomp2 = (char*)malloc(1000 * sizeof(char));
-    levels[1].mapDecomp = mapDecomp2;
     oscar_expand_lzo(mapDecomp2, Monde2Map);
-    mapDecomp3 = (char*)malloc(1000 * sizeof(char));
-    levels[2].mapDecomp = mapDecomp3;
     oscar_expand_lzo(mapDecomp3, Monde3Map);
+
 
     hudDirty = 1;
     init_sprites();
@@ -1073,7 +1196,4 @@ int main(void)
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }        
     }
-    free(mapDecomp1);
-    free(mapDecomp2);
-    free(mapDecomp3);
 }
