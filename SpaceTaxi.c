@@ -65,36 +65,43 @@
  *============================================================================*/
 
 const char Monde1Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde1.ctm" 
+    #embed ctm_chars lzo "./assets/monde_tiles1.ctm" 
 };
 const char Monde1Map[] = {
-    #embed ctm_map8 lzo "./assets/monde1.ctm"
+    #embed ctm_map8 lzo "./assets/monde_tiles1.ctm"
 };
 const char Monde1Color[] = {
-    #embed ctm_attr1 "./assets/monde1.ctm"
+    #embed ctm_attr1 "./assets/monde_tiles1.ctm"
 };
-const char Monde2Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde2.ctm" 
-};
-const char Monde2Map[] = {
-    #embed ctm_map8 lzo "./assets/monde2.ctm"
-};
-const char Monde2Color[] = {
-    #embed ctm_attr1 "./assets/monde2.ctm"
-};
-const char Monde3Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde3.ctm" 
-};
-const char Monde3Map[] = {
-    #embed ctm_map8 lzo "./assets/monde3.ctm"
-};
-const char Monde3Color[] = {
-    #embed ctm_attr1 "./assets/monde3.ctm"
+const char Monde1Tiles[] = {
+    #embed ctm_tiles8 "./assets/monde_tiles1.ctm"
 };
 
-//const char Monde1Tiles[] = {
-//    #embed ctm_tiles8sw lzo "./assets/monde2.ctm"
-//};
+const char Monde2Chars[] = {   
+    #embed ctm_chars lzo "./assets/monde_tiles2.ctm" 
+};
+const char Monde2Map[] = {
+    #embed ctm_map8 lzo "./assets/monde_tiles2.ctm"
+};
+const char Monde2Color[] = {
+    #embed ctm_attr1 "./assets/monde_tiles2.ctm"
+};
+const char Monde2Tiles[] = {
+    #embed ctm_tiles8 "./assets/monde_tiles2.ctm"
+};
+
+const char Monde3Chars[] = {   
+    #embed ctm_chars lzo "./assets/monde_tiles3.ctm" 
+};
+const char Monde3Map[] = {
+    #embed ctm_map8 lzo "./assets/monde_tiles3.ctm"
+};
+const char Monde3Color[] = {
+    #embed ctm_attr1 "./assets/monde_tiles3.ctm"
+};
+const char Monde3Tiles[] = {
+    #embed ctm_tiles8 "./assets/monde_tiles3.ctm"
+};
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
 
@@ -245,6 +252,7 @@ typedef struct {
     /* Données CharPad */
     const char *chars;
     const char *map;
+    const char *tiles;
     const char *color;
     uint8_t     color_back;   /* couleur de fond Bg0 */
     uint8_t     color_back1;  /* M1 */
@@ -269,6 +277,7 @@ const LevelData levels[MAX_LEVELS] = {
         .enemyCount    = 2,
         .chars         = Monde1Chars,
         .map           = Monde1Map,
+        .tiles         = Monde1Tiles,
         .color         = Monde1Color,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
@@ -285,6 +294,7 @@ const LevelData levels[MAX_LEVELS] = {
         .enemyCount    = 3,
         .chars         = Monde2Chars,
         .map           = Monde2Map,
+        .tiles         = Monde2Tiles,
         .color         = Monde2Color,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
@@ -301,6 +311,7 @@ const LevelData levels[MAX_LEVELS] = {
         .enemyCount    = 4,
         .chars         = Monde3Chars,
         .map           = Monde3Map,
+        .tiles         = Monde3Tiles,
         .color         = Monde3Color,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
@@ -338,6 +349,7 @@ static void drawNumber(char *row, char *colorRow, int pos, int value, int digits
 void music_init(char subtune);
 void music_play(void);
 static void load_charpad_level(int levelIdx);
+void tile_expand_map(char* map, const char* tiles);
 
 /*=============================================================================
  *  Stubs (à implémenter)
@@ -900,11 +912,17 @@ static void load_charpad_level(int levelIdx)
     oscar_expand_lzo(Charset, ld->chars);
     mmap_set(MMAP_NO_BASIC);
 
-    oscar_expand_lzo(Screen, ld->map);
+    //oscar_expand_lzo(Screen, ld->map);
+    memset(Screen, 0, 1000);
 
-    char * const ColorRAM = (char *)0xD800;
+    static char mapBuffer[60];
+    oscar_expand_lzo(mapBuffer, ld->map);
+
+    tile_expand_map(mapBuffer, ld->tiles);
+
+    char *ColorRAM = (char *)0xD800;
     for (int i = 0; i < 1000; i++)
-        ColorRAM[i] = (ld->color[(uint8_t)Screen[i]]) | 0x08;
+        ColorRAM[i] = ld->color[(uint8_t)Screen[i]] | 0x08;
 
     vic.color_back   = ld->color_back;
     vic.color_back1  = ld->color_back1;
@@ -913,6 +931,29 @@ static void load_charpad_level(int levelIdx)
 
     /* Met à jour l'IRQ game avec la bonne couleur de fond */
     rirq_data(&game, 2, ld->color_back);
+}
+
+void tile_expand_map(char* map, const char* tiles)
+{
+    const char *mp = map;
+    char *sp = Screen + 40;   // ligne 1, après HUD 
+
+    for (char y = 0; y < 6; y++) {
+        for (char x = 0; x < 10; x++) {
+            const char *tp = tiles + 16 * (uint8_t)mp[x];
+
+            #pragma unroll(full)
+            for (char iy = 0; iy < 4; iy++) {
+                #pragma unroll(full)
+                for (char ix = 0; ix < 4; ix++) {
+                    sp[40 * iy + ix] = tp[4 * iy + ix];
+                }
+            }
+            sp += 4;      // tile suivante : 4 chars à droite 
+        }
+        mp += 10;         // ligne suivante de tiles 
+        sp += 40 * 3;     // 3 lignes de chars supplémentaires 
+    }
 }
 
 /*=============================================================================
@@ -934,7 +975,7 @@ static void init_irq(void)
     rirq_set(0, 48, &hud);
     
     rirq_build(&game, 3);
-    rirq_write(&game, 0, &vic.memptr,     0x1e); // 7 * $800 = $3800 --> cf adresse chartset
+    rirq_write(&game, 0, &vic.memptr,     0x1e); // 0x1e = 7 * $800 = $3800 --> cf adresse chartset
     rirq_write(&game, 1, &vic.ctrl2,      0x18);
     rirq_write(&game, 2, &vic.color_back, VCOL_BROWN);
     rirq_set(1, 58, &game);
@@ -964,11 +1005,9 @@ int main(void)
     init_player();
   
     vic_setmode(VICM_TEXT_MC, Screen, Charset);
-    init_irq();           /* IRQ d'abord */
     load_charpad_level(0); /* puis la map */
 
     loadLevel(&level1);
-    //drawMap();
     drawBottomPanel();
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
     music_init(1);
