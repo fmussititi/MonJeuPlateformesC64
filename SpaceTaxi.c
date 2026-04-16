@@ -8,6 +8,8 @@
 #include <c64/rasterirq.h>
 #include <c64/sprites.h>
 #include <c64/memmap.h>
+#include <c64/kernalio.h>
+#include <c64/flossiec.h>
 #include <oscar.h>
 #include <string.h>
 #include <stdint.h>
@@ -64,66 +66,17 @@
  *  Données Charpad
  *============================================================================*/
 
-const char Monde1Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles1_1x1.ctm" 
-};
-const char Monde1Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles1_1x1.ctm"
-};
-const char Monde1Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles1_1x1.ctm"
-};
-const char Monde1Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles1_1x1.ctm"
-};
+static const uint8_t Monde1Collision[5] = {0,0,0,1,0};
+static const uint8_t Monde2Collision[4] = {0,0,1,0};
+static const uint8_t Monde3Collision[6] = {0,0,0,0,1,0};
 
-static const uint8_t Monde1Collision[5] = {
-    0,0,0,1,0
-};
+char * const mondeTiles   = (char *)0x5000;   // 0x5000 256 octets  → fin $5100
+char * const mondeColor   = (char *)0x5100;   // 0x5100 1000 octets → fin $54E8
+char * const mondeMap     = (char *)0x5500;   // 0x5500 1000 octets → fin $58E8
+char * const mondeCharset = (char *)0x5900;   // 0x5900 2048 octets → fin $6100
 
-const char Monde2Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles2_1x1.ctm" 
-};
-const char Monde2Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles2_1x1.ctm"
-};
-const char Monde2Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles2_1x1.ctm"
-};
-const char Monde2Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles2_1x1.ctm"
-};
-
-static const uint8_t Monde2Collision[4] = {
-    0,0,1,0
-};
-
-const char Monde3Chars[] = {   
-    #embed ctm_chars lzo "./assets/monde_tiles3_1x1.ctm" 
-};
-const char Monde3Map[] = {
-    #embed ctm_map8 lzo "./assets/monde_tiles3_1x1.ctm"
-};
-const char Monde3Color[] = {
-    #embed ctm_attr1 "./assets/monde_tiles3_1x1.ctm"
-};
-const char Monde3Tiles[] = {
-    #embed ctm_tiles8 "./assets/monde_tiles3_1x1.ctm"
-};
-
-static const uint8_t Monde3Collision[6] = {
-    0,0,0,0,1,0
-};
-
-static char mapBuffer[40*25];
-
-char * const mapDecomp1 = (char *)0x6800;  // 1000 octets
-char * const mapDecomp2 = (char *)0x6C00;  // 1000 octets  
-char * const mapDecomp3 = (char *)0x7000;  // 1000 octets
-
-char * const charsDecomp1 = (char *)0x5000;  // après heap node $4778
-char * const charsDecomp2 = (char *)0x5800;
-char * const charsDecomp3 = (char *)0x6000;
+// Variables globales
+floss_blk levelBlks[12];  // 4 fichiers × 3 niveaux
 
 char * const Charset = (char *)0x3800;  /* zone libre en RAM */
 
@@ -204,6 +157,7 @@ __export const char music[] = {
  *============================================================================*/
 
 char * const Screen    = (char *)0x0400;  /* écran texte par défaut           */
+char * const ColorRAM  = (char *)0xD800;
 char * const SpriteRAM = (char *)0x3000;  /* données sprites (hors BASIC)     */
 
 static uint8_t sprite_base; /* index de bloc sprite (addr / 64)              */
@@ -258,12 +212,11 @@ typedef struct {
     uint8_t enemyCount;
 
     /* Données CharPad */
-    const char *chars;
-    const char *map;
-    const char *tiles;
-    const char *color;
-    char *mapDecomp;     // pointeur vers map décompressée
-    char *charsDecomp;   // pointeur vers charset décompressé
+    char* tiles;
+    int tilesCount;
+    char* color;
+    char* map;
+    char* chars;
     const uint8_t *tileCollision;
     uint8_t     color_back;   /* couleur de fond Bg0 */
     uint8_t     color_back1;  /* M1 */
@@ -282,13 +235,12 @@ LevelData levels[MAX_LEVELS] = {
     {
         .enemies       = {{80, 0, 200}, {200, 0, -200}},
         .enemyCount    = 2,
-        .chars         = Monde1Chars,
-        .map           = Monde1Map,
-        .tiles         = Monde1Tiles,
-        .color         = Monde1Color,
         .tileCollision = Monde1Collision,
-        .charsDecomp   = charsDecomp1,
-        .mapDecomp     = mapDecomp1,
+        .tiles         = mondeTiles,
+        .tilesCount    = 5,
+        .color         = mondeColor,
+        .map           = mondeMap,
+        .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -298,13 +250,12 @@ LevelData levels[MAX_LEVELS] = {
     {
         .enemies       = {{100, 0, 150}, {250, 0, -150}, {50, 0, 200}},
         .enemyCount    = 3,
-        .chars         = Monde2Chars,
-        .map           = Monde2Map,
-        .tiles         = Monde2Tiles,
-        .color         = Monde2Color,
         .tileCollision = Monde2Collision,
-        .charsDecomp   = charsDecomp2,
-        .mapDecomp     = mapDecomp2,
+        .tiles         = mondeTiles,
+        .tilesCount    = 4,
+        .color         = mondeColor,
+        .map           = mondeMap,
+        .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -314,13 +265,12 @@ LevelData levels[MAX_LEVELS] = {
     {
         .enemies       = {{60, 0, 250}, {180, 0, -250}, {280, 0, 200}, {120, 0, -200}},
         .enemyCount    = 4,
-        .chars         = Monde3Chars,
-        .map           = Monde3Map,
-        .tiles         = Monde3Tiles,
-        .color         = Monde3Color,
         .tileCollision = Monde3Collision,
-        .charsDecomp   = charsDecomp3,
-        .mapDecomp     = mapDecomp3,
+        .tiles         = mondeTiles,
+        .tilesCount    = 6,
+        .color         = mondeColor,
+        .map           = mondeMap,
+        .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
         .color_back1   = VCOL_WHITE,
         .color_back2   = VCOL_LT_GREY,
@@ -373,8 +323,7 @@ void applyPatches(void)     {}
  *============================================================================*/
 
 static void init_sprites(void)
-{
-    //mmap_trampoline();
+{    
     mmap_set(MMAP_RAM);
     mmap_set(MMAP_NO_BASIC);
 
@@ -875,7 +824,7 @@ static bool isSolidAtPixel(int px, int py)
 
     const LevelData *ld = &levels[currentLevel];
 
-    uint8_t tileIndex = mapBuffer[tileY * 40 + tileX];
+    uint8_t tileIndex = ld->map[tileY * 40 + tileX];
     uint8_t coll      = ld->tileCollision[tileIndex];
 
     //debugTileIndexBottom(tileIndex, coll);
@@ -1050,26 +999,67 @@ void music_play(void)
 
 
 /*=============================================================================
- *  CHARPAD données et init
+ *  CHARPAD load
  *============================================================================*/
 
 static void load_charpad_level(int levelIdx)
-{
+{  
+    // Prépare l'écran de loading
+    memset(Screen, 32, 1000);
+
+    rirq_data(&hud, 2, VCOL_BLACK);
+    rirq_data(&game, 0, 0x15);
+    rirq_data(&game, 1, 0x08);
+    rirq_data(&game, 2, VCOL_BLACK);
+    rirq_data(&bottom, 2, VCOL_BLACK);
+
+    vic.spr_enable = 0;    // tous les sprites sont disabled
+
+    const char *msg = "LOADING...";
+    int start = (40 - 10) / 2 + 40 * 12;
+
+    for (int i = 0; msg[i]; i++) {
+        char c = msg[i];
+        if (c >= 'A' && c <= 'Z') c = c - 'A' + 1;
+        Screen[start + i] = c;
+        ColorRAM[start + i] = VCOL_WHITE;
+    }
+
+    vic.color_back   = VCOL_BLACK;
+    vic.color_border = VCOL_BLACK;
+
+    // Chargement
+
     const LevelData *ld = &levels[levelIdx];
+    int bi = levelIdx * 4;
 
-    // Copie du charset déjà décompressé
-    memcpy(Charset, ld->charsDecomp, 2048);
+    // Lecture depuis disque
+    flossiec_open(levelBlks[bi].track,   levelBlks[bi].sector);
+    flossiec_read_lzo(ld->chars, 2048);
+    flossiec_close();
 
-    // Copie de la map déjà décompressée
-    memcpy(mapBuffer, ld->mapDecomp, 40*25);
+    flossiec_open(levelBlks[bi+1].track, levelBlks[bi+1].sector);
+    flossiec_read_lzo(ld->map, 1000);
+    flossiec_close();  
 
-    memset(Screen, 0, 1000);
+    flossiec_open(levelBlks[bi+2].track, levelBlks[bi+2].sector);
+    flossiec_read(ld->color, 256);
+    flossiec_close();  
 
-    tile_expand_map(mapBuffer, ld->tiles);
+    flossiec_open(levelBlks[bi+3].track, levelBlks[bi+3].sector);
+    flossiec_read(ld->tiles, ld->tilesCount);
+    flossiec_close();
+    
+    // Fin du chargement, on bascule sur l'autre monde
 
-    char *ColorRAM = (char *)0xD800;
+    mmap_set(MMAP_RAM);      
+    memcpy(Charset, ld->chars, 2048);
+    mmap_set(MMAP_NO_BASIC);
+
+    tile_expand_map(ld->map, ld->tiles);
+
     for (int i = 0; i < 1000; i++)
-        ColorRAM[i] = ld->color[(uint8_t)Screen[i]] | 0x08;
+        ColorRAM[i] = ld->color[(uint8_t)Screen[i]] & 0x0F;;
 
     vic.color_back   = ld->color_back;
     vic.color_back1  = ld->color_back1;
@@ -1077,7 +1067,17 @@ static void load_charpad_level(int levelIdx)
     vic.color_border = ld->color_border;
 
     /* Met à jour l'IRQ game avec la bonne couleur de fond */
+    rirq_data(&hud, 2, VCOL_CYAN);
+    rirq_data(&game, 0, 0x1e);
+    rirq_data(&game, 1, 0x18);
     rirq_data(&game, 2, ld->color_back);
+    rirq_data(&bottom, 2, VCOL_DARK_GREY);
+
+    // On remet tous les sprites
+    vic.spr_enable |= (1 << PLAYER_SPRITE);
+
+    for (int i = 0; i < ld->enemyCount; i++)
+        vic.spr_enable |= (1 << enemies[i].spriteId);
 }
 
 void tile_expand_map(char* map, const char* tiles)
@@ -1129,30 +1129,52 @@ static void init_irq(void)
     rirq_start();
 }
 
+// Après les flosskio_mapdir, avant tout chargement :
+static void debug_blks(floss_blk *blks, int count)
+{
+    char *row      = Screen;
+    char *colorRow = (char *)0xD800;
+
+    for (int i = 0; i < count; i++) {
+        // Track
+        row[i * 6 + 0] = '0' + (blks[i].track / 10);
+        row[i * 6 + 1] = '0' + (blks[i].track % 10);
+        row[i * 6 + 2] = '/';
+        // Sector
+        row[i * 6 + 3] = '0' + (blks[i].sector / 10);
+        row[i * 6 + 4] = '0' + (blks[i].sector % 10);
+        row[i * 6 + 5] = ' ';
+
+        colorRow[i * 6 + 0] = VCOL_YELLOW;
+        colorRow[i * 6 + 1] = VCOL_YELLOW;
+        colorRow[i * 6 + 2] = VCOL_WHITE;
+        colorRow[i * 6 + 3] = VCOL_CYAN;
+        colorRow[i * 6 + 4] = VCOL_CYAN;
+        colorRow[i * 6 + 5] = VCOL_WHITE;
+    }
+}
+
 /*=============================================================================
  *  Point d'entrée
  *============================================================================*/
-
 int main(void)
-{ 
-    mmap_trampoline();  
-    mmap_set(MMAP_RAM);
-    oscar_expand_lzo(charsDecomp1, Monde1Chars);
-    oscar_expand_lzo(charsDecomp2, Monde2Chars);
-    oscar_expand_lzo(charsDecomp3, Monde3Chars);
-    mmap_set(MMAP_ROM);
+{       
+    mmap_trampoline();
 
-    oscar_expand_lzo(mapDecomp1, Monde1Map);
-    oscar_expand_lzo(mapDecomp2, Monde2Map);
-    oscar_expand_lzo(mapDecomp3, Monde3Map);
+    // Init fast loader
+    flossiec_init(8);
 
+    flossiec_mapdir(p"chars1,map1,colour1,tiles1,chars2,map2,colour2,tiles2,chars3,map3,colour3,tiles3", levelBlks);
 
+    //debug_blks(levelBlks, 4);
+    //for (;;) ;
     hudDirty = 1;
+
     init_sprites();
     init_player();
-  
+
     vic_setmode(VICM_TEXT_MC, Screen, Charset);
-    load_charpad_level(0); /* puis la map */
+    load_charpad_level(0);
 
     drawBottomPanel();
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
@@ -1161,7 +1183,7 @@ int main(void)
     init_irq();
 
     for (;;) {
-        vic_waitFrame();     
+        vic_waitFrame();
 
         updatePlayer();
         updateEnemies();
@@ -1194,6 +1216,8 @@ int main(void)
             load_charpad_level(currentLevel); 
             drawBottomPanel();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
-        }        
+        }       
     }
+
+    flossiec_shutdown();
 }
