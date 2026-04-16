@@ -5,7 +5,7 @@
             "type": "vice",
             "request": "launch",
             "name": "Launch Vice",
-            "program": "${workspaceFolder}\\SpaceTaxi.prg",
+            "program": "${workspaceFolder}\\SpaceTaxi.d64",
             "preLaunchTask": "${defaultBuildTask}"
         }
     ]

@@ -7,7 +7,22 @@
             "command": "F:\\CompilationC64\\oscar64\\bin\\oscar64.exe",
             "args": [
                 "-O1",
-                "${workspaceFolder}\\SpaceTaxi.c"
+                "${workspaceFolder}\\SpaceTaxi.c",
+                "-d64=${workspaceFolder}\\SpaceTaxi.d64"
+                "-fz=${workspaceFolder}\\assets\\chars1.bin",
+                "-fz=${workspaceFolder}\\assets\\map1.bin",
+                "-f=${workspaceFolder}\\assets\\colour1.bin",
+                "-f=${workspaceFolder}\\assets\\tiles1.bin",
+
+                "-fz=${workspaceFolder}\\assets\\chars2.bin",
+                "-fz=${workspaceFolder}\\assets\\map2.bin",
+                "-f=${workspaceFolder}\\assets\\colour2.bin",
+                "-f=${workspaceFolder}\\assets\\tiles2.bin",
+                
+                "-fz=${workspaceFolder}\\assets\\chars3.bin",
+                "-fz=${workspaceFolder}\\assets\\map3.bin",
+                "-f=${workspaceFolder}\\assets\\colour3.bin",
+                "-f=${workspaceFolder}\\assets\\tiles3.bin"
             ],
             "options": { "cwd": "${workspaceFolder}" },
             "problemMatcher": [],
