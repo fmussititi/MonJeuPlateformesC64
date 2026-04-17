@@ -158,7 +158,7 @@ __export const char music[] = {
 
 char * const Screen    = (char *)0x0400;  /* écran texte par défaut           */
 char * const ColorRAM  = (char *)0xD800;
-char * const SpriteRAM = (char *)0x3000;  /* données sprites (hors BASIC)     */
+char * const SpriteRAM = (char *)0x3400;  /* données sprites (hors BASIC)     */
 
 static uint8_t sprite_base; /* index de bloc sprite (addr / 64)              */
 
@@ -616,68 +616,6 @@ void updateEnemies(void)
         e->x = e->xf >> 8;
         e->y = e->yf >> 8;
 
-        /* --- Auto-franchissement horizontal (safe) --- */
-        if (e->vx > 0) {
-            int rightX = e->x + ENEMIES_WIDTH - 1;
-
-            // collision murale ?
-            if (isSolidAtPixel(rightX, e->y + 4) ||
-                isSolidAtPixel(rightX, e->y + ENEMIES_HEIGHT - 4)) {
-
-                // Conditions de sécurité
-                if (e->vy > 0) goto blockRight;        // en chute → pas de step-up
-                if (e->y <= 2) goto blockRight;        // trop haut → pas de step-up
-                if (isSolidAtPixel(rightX, e->y - 4)) goto blockRight; // plafond
-
-                // Step-up 1 à 4 pixels
-                for (int step = 1; step <= 4; step++) {
-                    if (!isSolidAtPixel(rightX, e->y - step)) {
-                        e->y  -= step;
-                        e->yf -= (step << 8);
-                        goto endRight;
-                    }
-                }
-
-        blockRight:
-                // Demi-tour propre
-                e->vx = -e->vx;
-                e->xf = (long)e->x << 8;
-
-        endRight:
-                ;
-            }
-        }
-        else if (e->vx < 0) {
-            int leftX = e->x;
-
-            // collision murale ?
-            if (isSolidAtPixel(leftX, e->y + 4) ||
-                isSolidAtPixel(leftX, e->y + ENEMIES_HEIGHT - 4)) {
-
-                // Conditions de sécurité
-                if (e->vy > 0) goto blockLeft;        // en chute → pas de step-up
-                if (e->y <= 2) goto blockLeft;        // trop haut → pas de step-up
-                if (isSolidAtPixel(leftX, e->y - 4)) goto blockLeft; // plafond
-
-                // Step-up 1 à 4 pixels
-                for (int step = 1; step <= 4; step++) {
-                    if (!isSolidAtPixel(leftX, e->y - step)) {
-                        e->y  -= step;
-                        e->yf -= (step << 8);
-                        goto endLeft;
-                    }
-                }
-
-        blockLeft:
-                // Demi-tour propre
-                e->vx = -e->vx;
-                e->xf = (long)e->x << 8;
-
-        endLeft:
-                ;
-            }
-        }
-
         /* --- Bord de plateforme → demi-tour (patrouille seulement) --- */
         if (e->aiMode == AI_PATROL) {
             int lookX   = e->x + ((e->vx > 0) ? ENEMIES_WIDTH : -1);
@@ -696,7 +634,58 @@ void updateEnemies(void)
             e->y  = newFeetY - ENEMIES_HEIGHT;
             e->yf = (long)e->y << 8;
             e->vy = 0;
-        } 
+        }
+        
+        /* --- Franchissement optimisé (Marche de 8px / 1 Tile) --- */
+        if (e->vx > 0) {
+            int rightX = e->x + ENEMIES_WIDTH - 1;
+
+            // Test obstacle au niveau du pied
+            if (isSolidAtPixel(rightX, e->y + ENEMIES_HEIGHT - 1)) {
+
+                // Test hauteur libre après montée
+                if (!isSolidAtPixel(rightX, e->y - 8 + ENEMIES_HEIGHT - 1) &&
+                    !isSolidAtPixel(rightX, e->y - 8 + ENEMIES_HEIGHT / 2)) {
+
+                    // Succès : grimpe
+                    e->y  -= 8;
+                    e->yf  = (long)e->y << 8;
+
+                    // Recalage X
+                    //e->x   = (rightX / 8) * 8 - ENEMIES_WIDTH;
+                    e->x = (rightX / 8) * 8 - ENEMIES_WIDTH - 1;
+                    e->xf  = (long)e->x << 8;
+
+                } else {
+                    // Échec : demi-tour
+                    e->vx = -e->vx;
+                    e->x  = (rightX / 8) * 8 - ENEMIES_WIDTH;
+                    e->xf = (long)e->x << 8;
+                }
+            }
+        }
+        else if (e->vx < 0) {
+            int leftX = e->x;
+
+            if (isSolidAtPixel(leftX, e->y + ENEMIES_HEIGHT - 1)) {
+
+                if (!isSolidAtPixel(leftX, e->y - 8 + ENEMIES_HEIGHT - 1) &&
+                    !isSolidAtPixel(leftX, e->y - 8 + ENEMIES_HEIGHT / 2)) {
+
+                    e->y  -= 8;
+                    e->yf  = (long)e->y << 8;
+
+                    //e->x   = (leftX / 8 + 1) * 8;
+                    e->x = (leftX / 8 + 1) * 8 + 1;
+                    e->xf  = (long)e->x << 8;
+
+                } else {
+                    e->vx = -e->vx;
+                    e->x  = (leftX / 8 + 1) * 8;
+                    e->xf = (long)e->x << 8;
+                }
+            }
+        }
 
         /* --- Garde-fou bas de map --- */
         if (e->yf > ((long)(WORLD_MAX_Y) << 8)) {
@@ -812,12 +801,12 @@ void drawDebugColumns(void)
 
 static bool isSolidAtPixel(int px, int py)
 {
-    int worldY = py - 8;  // HUD = 8 pixels
+    //int worldY = py - 8;  // HUD = 8 pixels
 
-    if (worldY < 0) return false;
+    //if (worldY < 0) return false;
 
-    int tileX = px >> 3;  // largeur = 16 px
-    int tileY = py >> 3;  // hauteur = 32 px (4 chars)
+    int tileX = px >> 3;
+    int tileY = py >> 3; 
 
     if (tileX < 0 || tileX >= 40 || tileY < 0 || tileY >= 25)
         return false;
