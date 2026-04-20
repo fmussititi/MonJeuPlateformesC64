@@ -67,13 +67,13 @@
  *============================================================================*/
 
 static const uint8_t Monde1Collision[5] = {0,0,0,1,0};
-static const uint8_t Monde2Collision[4] = {0,0,1,0};
-static const uint8_t Monde3Collision[6] = {0,0,0,0,1,0};
+static const uint8_t Monde2Collision[5] = {0,0,0,1,0};
+static const uint8_t Monde3Collision[5] = {0,0,0,1,0};
 
 char * const mondeTiles   = (char *)0x5000;   // 0x5000 256 octets  → fin $5100
 char * const mondeColor   = (char *)0x5100;   // 0x5100 1000 octets → fin $54E8
-char * const mondeMap     = (char *)0x5500;   // 0x5500 1000 octets → fin $58E8
-char * const mondeCharset = (char *)0x5900;   // 0x5900 2048 octets → fin $6100
+char * const mondeMap     = (char *)0x6000;   // 0x5500 1000 octets → fin $58E8
+char * const mondeCharset = (char *)0x7000;   // 0x5900 2048 octets → fin $6100
 
 // Variables globales
 floss_blk levelBlks[12];  // 4 fichiers × 3 niveaux
@@ -158,7 +158,7 @@ __export const char music[] = {
 
 char * const Screen    = (char *)0x0400;  /* écran texte par défaut           */
 char * const ColorRAM  = (char *)0xD800;
-char * const SpriteRAM = (char *)0x3400;  /* données sprites (hors BASIC)     */
+char * const SpriteRAM = (char *)0x0340;  /* données sprites (hors BASIC)     */
 
 static uint8_t sprite_base; /* index de bloc sprite (addr / 64)              */
 
@@ -188,6 +188,9 @@ static int playerHP = 3;
 static int playerInvTimer = 0;   // frames d’invincibilite
 static int playerScore = 0;
 static uint8_t hudDirty;
+static int viewX = 0;   // en tiles (0 à 80 si map=120)
+static int worldMaxX;
+static int currentPage = -1;  // forcer le dessin au premier frame
 
 /*=============================================================================
  *  Structs
@@ -195,19 +198,22 @@ static uint8_t hudDirty;
 static bool  needLevelChange = false;
 
 typedef struct {
-    int x, y;
+    long x, y;
     long xf, yf;
     long vx, vy;      // ← vy ajouté
     bool active;
     uint8_t spriteId;
 
     uint8_t aiMode;   // 0 = patrouille, 1 = poursuite
+    int page;
 } Enemy;
 
 typedef struct {
     struct {
-        int x, y;
+        long x, y;
         int vx;
+        int page;
+        bool isAlreadySpawn;
     } enemies[MAX_ENEMIES];
     uint8_t enemyCount;
 
@@ -216,6 +222,8 @@ typedef struct {
     int tilesCount;
     char* color;
     char* map;
+    int mapWidth;   // en tiles
+    int mapHeight;  // en tiles
     char* chars;
     const uint8_t *tileCollision;
     uint8_t     color_back;   /* couleur de fond Bg0 */
@@ -233,48 +241,54 @@ static int currentLevel = 0;
 LevelData levels[MAX_LEVELS] = {
     /* Niveau 0 */
     {
-        .enemies       = {{80, 0, 200}, {200, 0, -200}},
+        .enemies       = {{80, 0, 200, 0, false}, {650, 0, -200, 2, false}},
         .enemyCount    = 2,
         .tileCollision = Monde1Collision,
         .tiles         = mondeTiles,
         .tilesCount    = 5,
         .color         = mondeColor,
         .map           = mondeMap,
+        .mapWidth      = 120,
+        .mapHeight     = 25,
         .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
-        .color_back1   = VCOL_WHITE,
-        .color_back2   = VCOL_LT_GREY,
-        .color_border  = VCOL_CYAN
+        .color_back1   = VCOL_LT_BLUE,
+        .color_back2   = VCOL_YELLOW,
+        .color_border  = VCOL_LT_BLUE
     },
     /* Niveau 1 */
     {
-        .enemies       = {{100, 0, 150}, {250, 0, -150}, {50, 0, 200}},
+        .enemies       = {{100, 0, 150, 0, false}, {250, 0, -150, 0, false}, {50, 0, 200, 0, false}},
         .enemyCount    = 3,
         .tileCollision = Monde2Collision,
         .tiles         = mondeTiles,
-        .tilesCount    = 4,
+        .tilesCount    = 5,
         .color         = mondeColor,
         .map           = mondeMap,
+        .mapWidth      = 120,
+        .mapHeight     = 25,
         .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
-        .color_back1   = VCOL_WHITE,
-        .color_back2   = VCOL_LT_GREY,
-        .color_border  = VCOL_CYAN
+        .color_back1   = VCOL_LT_BLUE,
+        .color_back2   = VCOL_YELLOW,
+        .color_border  = VCOL_LT_BLUE
     },
     /* Niveau 2 */
     {
-        .enemies       = {{60, 0, 250}, {180, 0, -250}, {280, 0, 200}, {120, 0, -200}},
+        .enemies       = {{60, 0, 250,0,false}, {180, 0, -250,0,false}, {280, 0, 200,0,false}, {120, 0, -200,0,false}},
         .enemyCount    = 4,
         .tileCollision = Monde3Collision,
         .tiles         = mondeTiles,
-        .tilesCount    = 6,
+        .tilesCount    = 5,
         .color         = mondeColor,
         .map           = mondeMap,
+        .mapWidth      = 120,
+        .mapHeight     = 25,
         .chars         = mondeCharset,
         .color_back    = VCOL_BROWN,
-        .color_back1   = VCOL_WHITE,
-        .color_back2   = VCOL_LT_GREY,
-        .color_border  = VCOL_CYAN
+        .color_back1   = VCOL_LT_BLUE,
+        .color_back2   = VCOL_YELLOW,
+        .color_border  = VCOL_LT_BLUE
     }
 };
 
@@ -310,6 +324,7 @@ void music_init(char subtune);
 void music_play(void);
 static void load_charpad_level(int levelIdx);
 void tile_expand_map(char* map, const char* tiles);
+static void resetEnemySpawnFlags(void);
 
 /*=============================================================================
  *  Stubs (à implémenter)
@@ -386,7 +401,7 @@ static void playerTakeDamage(int knockbackDir)
 void updatePlayer(void)
 {
     /* Sortie par la droite → niveau suivant */
-    if (playerX >= WORLD_MAX_X && !needLevelChange) {
+    if (playerX >= worldMaxX && !needLevelChange) {
         needLevelChange = true;
     }
 
@@ -412,9 +427,12 @@ void updatePlayer(void)
 
             playerIsDead = false;
 
+            currentPage = -1;
+
             /* Recharger le niveau 0 */
             load_charpad_level(0); /* puis la map */  
             drawBottomPanel();
+            resetEnemySpawnFlags();
             spawnLevelEnemies();
         }
         return;
@@ -461,8 +479,8 @@ void updatePlayer(void)
         playerXf = (long)WORLD_MIN_X << 8;
         playerVx = 0;
     }
-    if (playerXf > ((long)WORLD_MAX_X << 8)) {
-        playerXf = (long)WORLD_MAX_X << 8;
+    if (playerXf > ((long)worldMaxX << 8)) {
+        playerXf = (long)worldMaxX << 8;
         playerVx = 0;
     }
 
@@ -580,6 +598,7 @@ void spawnEnemy(int id, int x, int y, long vx)
     e->vy = 0;   // ← ajouter cette ligne
     e->active = true;
     e->spriteId = id + 1;   // sprite 1, 2, 3, 4…
+    e->page = levels[currentLevel].enemies[id].page;
 
     // Sprite VIC
     spr_set(e->spriteId,
@@ -698,8 +717,8 @@ void updateEnemies(void)
         if (e->x < 0) {
             e->x = 0; e->xf = 0; e->vx = -e->vx;
         }
-        if (e->x > WORLD_MAX_X) {
-            e->x  = WORLD_MAX_X;
+        if (e->x > worldMaxX) {
+            e->x  = worldMaxX;
             e->xf = (long)e->x << 8;
             e->vx = -e->vx;
         }
@@ -761,11 +780,19 @@ static void spawnLevelEnemies(void)
 
     /* Respawn selon le niveau */
     for (int i = 0; i < ld->enemyCount; i++) {
-        spawnEnemy(i,
-                   ld->enemies[i].x,
-                   ld->enemies[i].y,
-                   ld->enemies[i].vx);
+        if (ld->enemies[i].page == 0)
+            spawnEnemy(i,
+                    ld->enemies[i].x,
+                    ld->enemies[i].y,
+                    ld->enemies[i].vx);
     }
+}
+
+static void resetEnemySpawnFlags(void)
+{
+    LevelData *ld = &levels[currentLevel];
+    for (int i = 0; i < ld->enemyCount; i++)
+        ld->enemies[i].isAlreadySpawn = false;
 }
 
 /*=============================================================================
@@ -801,25 +828,21 @@ void drawDebugColumns(void)
 
 static bool isSolidAtPixel(int px, int py)
 {
-    //int worldY = py - 8;  // HUD = 8 pixels
-
-    //if (worldY < 0) return false;
-
     int tileX = px >> 3;
-    int tileY = py >> 3; 
-
-    if (tileX < 0 || tileX >= 40 || tileY < 0 || tileY >= 25)
-        return false;
+    int tileY = py >> 3;
 
     const LevelData *ld = &levels[currentLevel];
 
-    uint8_t tileIndex = ld->map[tileY * 40 + tileX];
-    uint8_t coll      = ld->tileCollision[tileIndex];
+    if (tileX < 0 || tileX >= ld->mapWidth ||
+        tileY < 0 || tileY >= ld->mapHeight)
+        return false;
 
-    //debugTileIndexBottom(tileIndex, coll);
+    uint8_t tileIndex = ld->map[tileY * ld->mapWidth + tileX];
+    uint8_t coll      = ld->tileCollision[tileIndex];
 
     return (coll != 0);
 }
+
 
 static bool checkCollisionAABB(int ax, int ay, int aw, int ah,
                                int bx, int by, int bw, int bh)
@@ -840,8 +863,9 @@ static bool checkCollisionAABB(int ax, int ay, int aw, int ah,
 
 void updateSprites(void)
 {
-    int hwX = playerX + SCREEN_OFFSET_X;
-    int hwY = playerY + SCREEN_OFFSET_Y + (MAP_Y_OFF * 8);  /* +8 pour la ligne HUD */
+    // Conversion position monde → position écran
+    int hwX = (playerX - viewX * 8) + SCREEN_OFFSET_X;
+    int hwY = playerY + SCREEN_OFFSET_Y + (MAP_Y_OFF * 8);
 
     vic.spr_pos[PLAYER_SPRITE].x = (byte)(hwX & 0xFF);
     vic.spr_pos[PLAYER_SPRITE].y = (byte)(hwY);
@@ -851,13 +875,12 @@ void updateSprites(void)
     else
         vic.spr_msbx &= ~(1 << PLAYER_SPRITE);
 
-
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &enemies[i];
         if (!e->active) continue;
 
-        int hwX = e->x + SCREEN_OFFSET_X;
-        int hwY = e->y + SCREEN_OFFSET_Y + (MAP_Y_OFF * 8);  /* +8 ici aussi */
+        int hwX = (e->x - viewX * 8) + SCREEN_OFFSET_X;
+        int hwY = e->y + SCREEN_OFFSET_Y + (MAP_Y_OFF * 8);
 
         vic.spr_pos[e->spriteId].x = (byte)(hwX & 0xFF);
         vic.spr_pos[e->spriteId].y = (byte)(hwY);
@@ -866,6 +889,13 @@ void updateSprites(void)
             vic.spr_msbx |=  (1 << e->spriteId);
         else
             vic.spr_msbx &= ~(1 << e->spriteId);
+
+        // Ennemi hors de la page visible → on le cache
+        if (hwX < SCREEN_OFFSET_X || hwX > SCREEN_OFFSET_X + 320) {
+            vic.spr_enable &= ~(1 << e->spriteId);
+            continue;
+        }
+        vic.spr_enable |= (1 << e->spriteId);
     }
 
     /* Clignotement invincibilité */
@@ -1028,7 +1058,7 @@ static void load_charpad_level(int levelIdx)
     flossiec_close();
 
     flossiec_open(levelBlks[bi+1].track, levelBlks[bi+1].sector);
-    flossiec_read_lzo(ld->map, 1000);
+    flossiec_read_lzo(ld->map, 3000);
     flossiec_close();  
 
     flossiec_open(levelBlks[bi+2].track, levelBlks[bi+2].sector);
@@ -1045,10 +1075,10 @@ static void load_charpad_level(int levelIdx)
     memcpy(Charset, ld->chars, 2048);
     mmap_set(MMAP_NO_BASIC);
 
-    tile_expand_map(ld->map, ld->tiles);
+    //tile_expand_map(ld->map, ld->tiles);
 
-    for (int i = 0; i < 1000; i++)
-        ColorRAM[i] = ld->color[(uint8_t)Screen[i]] & 0x0F;;
+    //for (int i = 0; i < 1000; i++)
+    //    ColorRAM[i] = ld->color[(uint8_t)Screen[i]] & 0x0F;
 
     vic.color_back   = ld->color_back;
     vic.color_back1  = ld->color_back1;
@@ -1056,11 +1086,13 @@ static void load_charpad_level(int levelIdx)
     vic.color_border = ld->color_border;
 
     /* Met à jour l'IRQ game avec la bonne couleur de fond */
-    rirq_data(&hud, 2, VCOL_CYAN);
+    rirq_data(&hud, 2, VCOL_LT_BLUE);
     rirq_data(&game, 0, 0x1e);
     rirq_data(&game, 1, 0x18);
     rirq_data(&game, 2, ld->color_back);
     rirq_data(&bottom, 2, VCOL_DARK_GREY);
+
+    worldMaxX = ld->mapWidth * 8 - PLAYER_WIDTH;
 
     // On remet tous les sprites
     vic.spr_enable |= (1 << PLAYER_SPRITE);
@@ -1076,6 +1108,26 @@ void tile_expand_map(char* map, const char* tiles)
 
     for (int i = 0; i < 40 * 23; i++) {
         sp[i] = tiles[(uint8_t)mp[i]];
+    }
+}
+
+void drawVisibleMap(void)
+{
+    const LevelData *ld = &levels[currentLevel];
+    int visibleRows = 25 - MAP_Y_OFF - 1;
+
+    for (int y = 0; y < visibleRows; y++) {
+        char *row      = Screen   + (y + MAP_Y_OFF) * 40;
+        char *colorRow = ColorRAM + (y + MAP_Y_OFF) * 40;
+
+        for (int x = 0; x < 40; x++) {
+            int srcX = viewX + x;
+            uint8_t tile    = (uint8_t)ld->map[y * ld->mapWidth + srcX];
+            uint8_t charIdx = (uint8_t)ld->tiles[tile];  // tile → char
+
+            row[x]      = charIdx;                        // char dans Screen
+            colorRow[x] = ld->color[charIdx] & 0x0F;     // couleur du char
+        }
     }
 }
 
@@ -1095,7 +1147,7 @@ static void init_irq(void)
     rirq_build(&hud, 3);
     rirq_write(&hud, 0, &vic.memptr,     0x15);
     rirq_write(&hud, 1, &vic.ctrl2,      0x08);
-    rirq_write(&hud, 2, &vic.color_back, VCOL_CYAN);
+    rirq_write(&hud, 2, &vic.color_back, VCOL_LT_BLUE);
     rirq_set(0, 48, &hud);
     
     rirq_build(&game, 3);
@@ -1155,7 +1207,7 @@ int main(void)
 
     flossiec_mapdir(p"chars1,map1,colour1,tiles1,chars2,map2,colour2,tiles2,chars3,map3,colour3,tiles3", levelBlks);
 
-    //debug_blks(levelBlks, 4);
+    //debug_blks(levelBlks, 12);
     //for (;;) ;
     hudDirty = 1;
 
@@ -1169,14 +1221,33 @@ int main(void)
     spawnLevelEnemies();   /* ← remplace les spawnEnemy hardcodés */
     music_init(1);
 
-    init_irq();
+    init_irq();  
 
     for (;;) {
         vic_waitFrame();
 
         updatePlayer();
+        // Page = écran de 40 tiles où se trouve le joueur
+        int playerTileX = playerX >> 3;
+        int page = playerTileX / 40;          // 0, 1 ou 2
+        if (page > 2) page = 2;              // sécurité
+
+        if (page != currentPage) {
+            currentPage = page;
+            viewX = page * 40;
+            drawVisibleMap();
+
+            // Spawn les ennemis de cette page
+            LevelData *ld = &levels[currentLevel];
+            for (int i = 0; i < ld->enemyCount; i++) {
+                if (ld->enemies[i].page == page && !ld->enemies[i].isAlreadySpawn) {
+                    spawnEnemy(i, ld->enemies[i].x, ld->enemies[i].y, ld->enemies[i].vx);
+                    ld->enemies[i].isAlreadySpawn = true;
+                }
+            }
+        }
         updateEnemies();
-        updateLevelLogic();
+        updateLevelLogic(); 
         updateSprites();
         //drawDebugColumns();        
 
@@ -1189,6 +1260,7 @@ int main(void)
         if (needLevelChange) {
             needLevelChange = false;
             hudDirty = 1;
+            currentPage = -1;
 
             currentLevel++;
             if (currentLevel >= MAX_LEVELS)
@@ -1204,6 +1276,7 @@ int main(void)
 
             load_charpad_level(currentLevel); 
             drawBottomPanel();
+            resetEnemySpawnFlags();
             spawnLevelEnemies();   /* ← respawn ennemis du nouveau niveau */
         }       
     }

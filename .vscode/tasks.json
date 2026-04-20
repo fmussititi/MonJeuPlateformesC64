@@ -8,7 +8,7 @@
             "args": [
                 "-O1",
                 "${workspaceFolder}\\SpaceTaxi.c",
-                "-d64=${workspaceFolder}\\SpaceTaxi.d64"
+                "-d64=${workspaceFolder}\\SpaceTaxi.d64",
                 "-fz=${workspaceFolder}\\assets\\chars1.bin",
                 "-fz=${workspaceFolder}\\assets\\map1.bin",
                 "-f=${workspaceFolder}\\assets\\colour1.bin",
@@ -18,7 +18,7 @@
                 "-fz=${workspaceFolder}\\assets\\map2.bin",
                 "-f=${workspaceFolder}\\assets\\colour2.bin",
                 "-f=${workspaceFolder}\\assets\\tiles2.bin",
-                
+
                 "-fz=${workspaceFolder}\\assets\\chars3.bin",
                 "-fz=${workspaceFolder}\\assets\\map3.bin",
                 "-f=${workspaceFolder}\\assets\\colour3.bin",
